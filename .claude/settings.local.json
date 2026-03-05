@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run dev:*)",
+      "Bash(start http://localhost:3000)",
+      "Bash(npx supabase:*)",
+      "Bash(start https://supabase.com/dashboard/account/tokens)",
+      "Bash(set SUPABASE_ACCESS_TOKEN=sbp_bfd2c9fdd2489c7becff9963deb7f8f0add1b7e3)",
+      "Bash(curl:*)",
+      "Bash(start:*)",
+      "Bash(taskkill:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(cmd //c \"taskkill /PID 31844 /F\")",
+      "Bash(cmd //c \"taskkill /PID 13640 /F\")",
+      "Bash(cmd //c \"taskkill /IM node.exe /F\")",
+      "Bash(npm run build:*)",
+      "Bash(timeout:*)",
+      "Bash(npx next dev --turbo=false)",
+      "Bash(ping:*)",
+      "Bash(set \"TURBOPACK=0\")",
+      "Bash(npx next dev)",
+      "Bash(cmd /c \"taskkill /F /PID 33496\")",
+      "Bash(powershell -Command \"Stop-Process -Name node -Force -ErrorAction SilentlyContinue; Remove-Item -Recurse -Force ''C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\.next'' -ErrorAction SilentlyContinue; Set-Location ''C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio''; npm run dev\")",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(del \"C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\nul\")",
+      "Bash(cmd //c \"del /f /q \"\"\\\\?\\\\C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\nul\"\"\")",
+      "Bash(powershell -Command \"Remove-Item -Path ''\\\\?\\\\C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\nul'' -Force -ErrorAction SilentlyContinue; if \\(Test-Path ''C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\nul''\\) { Write-Host ''Still exists'' } else { Write-Host ''Deleted'' }\")",
+      "Bash(powershell -Command \"Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Seconds 2; Remove-Item -Path ''C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio\\\\.next\\\\dev\\\\lock'' -Force -ErrorAction SilentlyContinue; Write-Host ''Cleaned up''\")",
+      "Bash(powershell:*)",
+      "Bash(cmd //c \"cd /d C:\\\\Users\\\\1\\\\Desktop\\\\webnovel-studio && npm run dev\")",
+      "Bash(cmd //c \"taskkill /F /IM node.exe 2>nul & timeout /t 2 /nobreak >nul\")",
+      "Bash(cmd //c:*)",
+      "Bash(dir:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
