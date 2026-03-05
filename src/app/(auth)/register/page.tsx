@@ -46,13 +46,17 @@ export default function RegisterPage() {
       if (authError) {
         if (authError.message.includes('already registered')) {
           setError('이미 가입된 이메일입니다.');
+        } else if (authError.message.includes('rate limit')) {
+          setError('이메일 전송 한도를 초과했습니다. 잠시 후 다시 시도해주세요.');
         } else {
           setError(authError.message);
         }
         return;
       }
 
-      setSuccess(true);
+      // 이메일 확인이 비활성화된 경우 바로 로그인됨
+      router.push('/projects');
+      return;
     } catch {
       setError('회원가입 중 오류가 발생했습니다.');
     } finally {
