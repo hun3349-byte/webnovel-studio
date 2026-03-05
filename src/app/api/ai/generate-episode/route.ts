@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildSlidingWindowContext } from '@/core/memory/sliding-window-builder';
 import { buildEpisodeGenerationPrompts } from '@/core/engine/prompt-injector';
 import {
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
         let episodeId: string | null = null;
 
         if (saveToDb) {
-          const supabase = createServiceRoleClient();
+          const supabase = await createServerSupabaseClient();
 
           const { data: episode, error } = await supabase
             .from('episodes')

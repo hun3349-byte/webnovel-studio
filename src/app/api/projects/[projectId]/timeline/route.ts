@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET: 타임라인 데이터 조회 (에피소드 + 로그 + 떡밥 통합)
 export async function GET(
@@ -8,7 +8,12 @@ export async function GET(
 ) {
   try {
     const { projectId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     // 병렬로 모든 데이터 가져오기
     const [episodesResult, logsResult, hooksResult, charactersResult] = await Promise.all([

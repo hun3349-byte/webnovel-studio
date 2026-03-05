@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET: 프로젝트의 Writing Memory 목록 조회
 export async function GET(
@@ -12,7 +12,12 @@ export async function GET(
     const activeOnly = searchParams.get('active') !== 'false';
     const feedbackType = searchParams.get('type');
 
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     let query = supabase
       .from('writing_memories')
@@ -71,6 +76,13 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     const body = await request.json();
 
     // 필수 필드 검증
@@ -78,17 +90,11 @@ export async function POST(
       return NextResponse.json({ error: 'feedback_type is required' }, { status: 400 });
     }
 
-    const supabase = createServiceRoleClient();
-
-    // 사용자 ID는 실제로는 인증에서 가져와야 함
-    // 현재는 임시로 고정값 사용
-    const userId = body.user_id || '00000000-0000-0000-0000-000000000000';
-
     const { data: memory, error } = await supabase
       .from('writing_memories')
       .insert({
         project_id: projectId,
-        user_id: userId,
+        user_id: user.id,
         feedback_type: body.feedback_type,
         original_text: body.original_text || null,
         edited_text: body.edited_text || null,

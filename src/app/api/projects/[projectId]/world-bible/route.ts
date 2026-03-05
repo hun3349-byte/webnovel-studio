@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 interface RouteParams {
   params: Promise<{ projectId: string }>;
@@ -9,7 +9,13 @@ interface RouteParams {
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    // 인증 확인
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     const { data, error } = await supabase
       .from('world_bibles')
@@ -38,6 +44,14 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
+    const supabase = await createServerSupabaseClient();
+
+    // 인증 확인
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
       world_name,
@@ -50,8 +64,6 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       forbidden_elements,
       additional_settings,
     } = body;
-
-    const supabase = createServiceRoleClient();
 
     // 현재 버전 조회
     const { data: current, error: fetchError } = await supabase

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callCompressLogApi } from '@/core/queue/log-queue-processor';
 
 interface RouteParams {
@@ -17,7 +17,12 @@ interface RouteParams {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId, episodeId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     // 1. 에피소드 조회
     const { data: episode, error: fetchError } = await supabase

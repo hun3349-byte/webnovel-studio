@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET: 특정 Writing Memory 조회
 export async function GET(
@@ -8,7 +8,12 @@ export async function GET(
 ) {
   try {
     const { projectId, memoryId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     const { data: memory, error } = await supabase
       .from('writing_memories')
@@ -40,8 +45,14 @@ export async function PATCH(
 ) {
   try {
     const { projectId, memoryId } = await params;
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const supabase = createServiceRoleClient();
 
     const updateData: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
@@ -82,7 +93,12 @@ export async function DELETE(
 ) {
   try {
     const { projectId, memoryId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     const { error } = await supabase
       .from('writing_memories')

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET: 프로젝트의 떡밥 목록 조회
 export async function GET(
@@ -12,7 +12,12 @@ export async function GET(
     const status = searchParams.get('status') || 'open';
     const limit = parseInt(searchParams.get('limit') || '10');
 
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     let query = supabase
       .from('story_hooks')
@@ -47,9 +52,14 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
-    const body = await request.json();
+    const supabase = await createServerSupabaseClient();
 
-    const supabase = createServiceRoleClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
+    const body = await request.json();
 
     const { data: hook, error } = await supabase
       .from('story_hooks')

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET: 프로젝트의 에피소드 로그 목록 조회 (슬라이딩 윈도우용)
 export async function GET(
@@ -12,7 +12,12 @@ export async function GET(
     const limit = parseInt(searchParams.get('limit') || '3');
     const beforeEpisode = searchParams.get('before'); // 특정 에피소드 이전의 로그만
 
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     let query = supabase
       .from('episode_logs')

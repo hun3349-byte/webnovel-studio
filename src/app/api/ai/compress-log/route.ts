@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { generateCompletion } from '@/lib/ai/claude-client';
 import type { LogCompressionResult } from '@/types/memory';
 import type { Json } from '@/types/database';
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
 
     // 1. 에피소드 조회
     const { data: episode, error: episodeError } = await supabase

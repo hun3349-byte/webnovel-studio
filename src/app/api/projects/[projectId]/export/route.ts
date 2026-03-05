@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import {
   formatForNaver,
   batchFormatForNaver,
@@ -20,6 +20,13 @@ export async function POST(
 ) {
   try {
     const { projectId } = await params;
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
       platform,
@@ -36,8 +43,6 @@ export async function POST(
     if (!platform) {
       return NextResponse.json({ error: 'platform is required' }, { status: 400 });
     }
-
-    const supabase = createServiceRoleClient();
 
     // 에피소드 조회
     let query = supabase
@@ -160,7 +165,12 @@ export async function GET(
 ) {
   try {
     const { projectId } = await params;
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
 
     // 에피소드 목록
     const { data: episodes, error } = await supabase

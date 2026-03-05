@@ -55,8 +55,8 @@ export async function POST(request: NextRequest) {
  */
 export async function GET() {
   try {
-    const { createServiceRoleClient } = await import('@/lib/supabase/server');
-    const supabase = createServiceRoleClient();
+    const { createServerSupabaseClient } = await import('@/lib/supabase/server');
+    const supabase = await createServerSupabaseClient();
 
     const { data: pendingItems, error } = await supabase
       .from('episode_log_queue')
