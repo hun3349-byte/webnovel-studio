@@ -1,4 +1,4 @@
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import type {
   SlidingWindowContext,
   EpisodeLogSummary,
@@ -35,7 +35,7 @@ export async function buildSlidingWindowContext(
     includeWritingPreferences = true,
   } = options;
 
-  const supabase = createServiceRoleClient();
+  const supabase = await createServerSupabaseClient();
 
   // 병렬로 모든 컨텍스트 데이터 조회
   const [
