@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server';
 
-// GET /api/projects - 프로젝트 목록 조회
+// GET /api/projects - 프로젝트 목록 조회 (로그인한 사용자의 프로젝트만)
 export async function GET() {
   try {
-    const supabase = createServiceRoleClient();
+    const supabase = await createServerSupabaseClient();
 
+    // 현재 로그인한 사용자 확인
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.' },
+        { status: 401 }
+      );
+    }
+
+    // 해당 사용자의 프로젝트만 조회
     const { data, error } = await supabase
       .from('projects')
       .select('*')
+      .eq('user_id', user.id)
       .order('updated_at', { ascending: false });
 
     if (error) throw error;
@@ -26,6 +38,18 @@ export async function GET() {
 // POST /api/projects - 새 프로젝트 생성
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createServerSupabaseClient();
+
+    // 현재 로그인한 사용자 확인
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { title, genre, target_platform } = body;
 
@@ -33,13 +57,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'title is required' }, { status: 400 });
     }
 
-    const supabase = createServiceRoleClient();
+    // Service Role 클라이언트로 프로젝트 생성 (RLS 우회)
+    const serviceClient = createServiceRoleClient();
 
-    // 프로젝트 생성
-    const { data: project, error: projectError } = await supabase
+    // 프로젝트 생성 (현재 사용자 ID 사용)
+    const { data: project, error: projectError } = await serviceClient
       .from('projects')
       .insert({
-        user_id: '00000000-0000-0000-0000-000000000000', // TODO: 실제 인증 연동
+        user_id: user.id,
         title,
         genre: genre || null,
         target_platform: target_platform || null,
@@ -52,7 +77,7 @@ export async function POST(request: NextRequest) {
     if (projectError) throw projectError;
 
     // 기본 World Bible 생성
-    const { error: wbError } = await supabase
+    const { error: wbError } = await serviceClient
       .from('world_bibles')
       .insert({
         project_id: project.id,

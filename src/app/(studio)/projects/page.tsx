@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 interface Project {
   id: string;
@@ -22,6 +23,8 @@ export default function ProjectsPage() {
   const [showModal, setShowModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('');
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -38,9 +41,26 @@ export default function ProjectsPage() {
     }
   }, []);
 
+  const loadUser = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.email) {
+      setUserEmail(user.email);
+    }
+  }, []);
+
   useEffect(() => {
     loadProjects();
-  }, [loadProjects]);
+    loadUser();
+  }, [loadProjects, loadUser]);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   const handleCreateProject = async () => {
     if (!newTitle.trim()) {
@@ -107,12 +127,30 @@ export default function ProjectsPage() {
             <h1 className="text-xl font-bold">내 프로젝트</h1>
             <p className="text-sm text-gray-400">{projects.length}개의 프로젝트</p>
           </div>
-          <button
-            onClick={() => setShowModal(true)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
-          >
-            + 새 프로젝트
-          </button>
+          <div className="flex items-center gap-4">
+            {/* User Info */}
+            <div className="flex items-center gap-2 text-sm">
+              <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-medium">
+                {userEmail?.charAt(0).toUpperCase() || '?'}
+              </div>
+              <span className="text-gray-400 hidden sm:inline">{userEmail}</span>
+            </div>
+            {/* Logout */}
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition"
+            >
+              {loggingOut ? '...' : '로그아웃'}
+            </button>
+            {/* New Project */}
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+            >
+              + 새 프로젝트
+            </button>
+          </div>
         </div>
       </div>
 

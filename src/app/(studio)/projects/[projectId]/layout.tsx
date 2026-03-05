@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
-import { useParams, usePathname } from 'next/navigation';
+import { useParams, usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 interface Project {
   id: string;
@@ -21,10 +22,13 @@ interface NavItem {
 export default function ProjectLayout({ children }: { children: ReactNode }) {
   const params = useParams();
   const pathname = usePathname();
+  const router = useRouter();
   const projectId = params.projectId as string;
 
   const [project, setProject] = useState<Project | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const loadProject = useCallback(async () => {
     try {
@@ -38,9 +42,26 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     }
   }, [projectId]);
 
+  const loadUser = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.email) {
+      setUserEmail(user.email);
+    }
+  }, []);
+
   useEffect(() => {
     loadProject();
-  }, [loadProject]);
+    loadUser();
+  }, [loadProject, loadUser]);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   const navItems: NavItem[] = [
     { href: `/projects/${projectId}`, label: '대시보드', icon: '🏠', shortLabel: '홈' },
@@ -119,18 +140,52 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-800">
+        {/* User Info & Logout */}
+        <div className="p-3 border-t border-gray-800">
           {!sidebarCollapsed ? (
-            <div className="text-xs text-gray-600">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                <span>Memory Pipeline Active</span>
+            <div className="space-y-3">
+              {/* User Email */}
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-medium">
+                  {userEmail?.charAt(0).toUpperCase() || '?'}
+                </div>
+                <span className="text-gray-400 truncate flex-1" title={userEmail || ''}>
+                  {userEmail || '로딩 중...'}
+                </span>
               </div>
-              <div className="text-gray-700">v1.0.0</div>
+
+              {/* Logout Button */}
+              <button
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="w-full px-3 py-1.5 text-xs text-gray-400 hover:text-white hover:bg-gray-800 rounded transition flex items-center justify-center gap-2"
+              >
+                {loggingOut ? '로그아웃 중...' : '로그아웃'}
+              </button>
+
+              {/* Status */}
+              <div className="text-xs text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                  <span>Memory Pipeline Active</span>
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-medium" title={userEmail || ''}>
+                {userEmail?.charAt(0).toUpperCase() || '?'}
+              </div>
+              <button
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded transition"
+                title="로그아웃"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+              </button>
               <span className="w-2 h-2 bg-green-500 rounded-full" title="Memory Pipeline Active"></span>
             </div>
           )}
