@@ -40,6 +40,92 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
+// POST /api/projects/[projectId]/world-bible - World Bible 생성
+export async function POST(request: NextRequest, { params }: RouteParams) {
+  try {
+    const { projectId } = await params;
+    const supabase = await createServerSupabaseClient();
+
+    // 인증 확인
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    }
+
+    // 프로젝트 소유권 확인
+    const { data: project, error: projectError } = await supabase
+      .from('projects')
+      .select('id')
+      .eq('id', projectId)
+      .eq('user_id', user.id)
+      .single();
+
+    if (projectError || !project) {
+      return NextResponse.json({ error: '프로젝트를 찾을 수 없습니다.' }, { status: 404 });
+    }
+
+    const body = await request.json();
+    const {
+      world_name,
+      time_period,
+      geography,
+      power_system_name,
+      power_system_ranks,
+      power_system_rules,
+      absolute_rules,
+      forbidden_elements,
+      additional_settings,
+    } = body;
+
+    // 기존 World Bible이 있는지 확인
+    const { data: existing } = await supabase
+      .from('world_bibles')
+      .select('id')
+      .eq('project_id', projectId)
+      .single();
+
+    if (existing) {
+      return NextResponse.json(
+        { error: 'World Bible이 이미 존재합니다. PATCH를 사용하세요.' },
+        { status: 409 }
+      );
+    }
+
+    const insertData = {
+      project_id: projectId,
+      world_name: world_name || null,
+      time_period: time_period || null,
+      geography: geography || null,
+      power_system_name: power_system_name || null,
+      power_system_ranks: power_system_ranks || [],
+      power_system_rules: power_system_rules || null,
+      absolute_rules: absolute_rules || [],
+      forbidden_elements: forbidden_elements || [],
+      additional_settings: additional_settings || {},
+      version: 1,
+    };
+
+    const { data, error } = await supabase
+      .from('world_bibles')
+      .insert(insertData)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('World Bible 생성 오류:', error);
+      throw error;
+    }
+
+    return NextResponse.json({ worldBible: data }, { status: 201 });
+  } catch (error) {
+    console.error('World Bible create error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to create World Bible' },
+      { status: 500 }
+    );
+  }
+}
+
 // PATCH /api/projects/[projectId]/world-bible - World Bible 수정
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {

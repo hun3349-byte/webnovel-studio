@@ -46,32 +46,75 @@ export default function WorldBiblePage() {
   const loadWorldBible = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await fetch(`/api/projects/${projectId}/world-bible`);
-      if (!res.ok) throw new Error('Failed to load');
+
+      // 404는 World Bible이 아직 없는 경우 - 정상 케이스
+      if (res.status === 404) {
+        console.log('World Bible이 아직 없음 - 빈 폼 표시');
+        setWorldBible(null);
+        setFormData({
+          world_name: '',
+          time_period: '',
+          geography: '',
+          power_system_name: '',
+          power_system_rules: '',
+          power_system_ranks: '',
+          absolute_rules: '',
+          forbidden_elements: '',
+        });
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const data = await res.json();
+
+      // 데이터가 없거나 worldBible이 null인 경우 처리
+      if (!data || !data.worldBible) {
+        console.log('World Bible 데이터가 비어있음');
+        setWorldBible(null);
+        return;
+      }
+
       setWorldBible(data.worldBible);
 
-      // Populate form
+      // Populate form (null-safe)
       const wb = data.worldBible;
       setFormData({
-        world_name: wb.world_name || '',
-        time_period: wb.time_period || '',
-        geography: wb.geography || '',
-        power_system_name: wb.power_system_name || '',
-        power_system_rules: wb.power_system_rules || '',
-        power_system_ranks: Array.isArray(wb.power_system_ranks)
+        world_name: wb?.world_name || '',
+        time_period: wb?.time_period || '',
+        geography: wb?.geography || '',
+        power_system_name: wb?.power_system_name || '',
+        power_system_rules: wb?.power_system_rules || '',
+        power_system_ranks: Array.isArray(wb?.power_system_ranks)
           ? wb.power_system_ranks.join('\n')
           : '',
-        absolute_rules: Array.isArray(wb.absolute_rules)
+        absolute_rules: Array.isArray(wb?.absolute_rules)
           ? wb.absolute_rules.join('\n')
           : '',
-        forbidden_elements: Array.isArray(wb.forbidden_elements)
+        forbidden_elements: Array.isArray(wb?.forbidden_elements)
           ? wb.forbidden_elements.join('\n')
           : '',
       });
-    } catch {
-      setError('World Bible을 불러오는데 실패했습니다.');
+    } catch (e) {
+      console.error('World Bible 로드 에러:', e);
+      // 에러가 발생해도 빈 폼을 표시하여 사용자가 새로 작성할 수 있게 함
+      setWorldBible(null);
+      setFormData({
+        world_name: '',
+        time_period: '',
+        geography: '',
+        power_system_name: '',
+        power_system_rules: '',
+        power_system_ranks: '',
+        absolute_rules: '',
+        forbidden_elements: '',
+      });
+      // 에러 메시지는 표시하되 치명적이지 않게
+      setError('기존 World Bible을 불러오지 못했습니다. 새로 작성할 수 있습니다.');
     } finally {
       setLoading(false);
     }
@@ -81,46 +124,54 @@ export default function WorldBiblePage() {
     loadWorldBible();
   }, [loadWorldBible]);
 
-  // Save World Bible
+  // Save World Bible (Create or Update)
   const handleSave = async () => {
     try {
       setSaving(true);
       setError(null);
       setSuccessMessage(null);
 
+      const payload = {
+        world_name: formData.world_name || null,
+        time_period: formData.time_period || null,
+        geography: formData.geography || null,
+        power_system_name: formData.power_system_name || null,
+        power_system_rules: formData.power_system_rules || null,
+        power_system_ranks: formData.power_system_ranks
+          .split('\n')
+          .map(s => s.trim())
+          .filter(Boolean),
+        absolute_rules: formData.absolute_rules
+          .split('\n')
+          .map(s => s.trim())
+          .filter(Boolean),
+        forbidden_elements: formData.forbidden_elements
+          .split('\n')
+          .map(s => s.trim())
+          .filter(Boolean),
+      };
+
+      // worldBible이 없으면 POST (생성), 있으면 PATCH (수정)
+      const method = worldBible ? 'PATCH' : 'POST';
       const res = await fetch(`/api/projects/${projectId}/world-bible`, {
-        method: 'PATCH',
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          world_name: formData.world_name || null,
-          time_period: formData.time_period || null,
-          geography: formData.geography || null,
-          power_system_name: formData.power_system_name || null,
-          power_system_rules: formData.power_system_rules || null,
-          power_system_ranks: formData.power_system_ranks
-            .split('\n')
-            .map(s => s.trim())
-            .filter(Boolean),
-          absolute_rules: formData.absolute_rules
-            .split('\n')
-            .map(s => s.trim())
-            .filter(Boolean),
-          forbidden_elements: formData.forbidden_elements
-            .split('\n')
-            .map(s => s.trim())
-            .filter(Boolean),
-        }),
+        body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error('Failed to save');
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `저장 실패 (${res.status})`);
+      }
 
       const data = await res.json();
       setWorldBible(data.worldBible);
       setSuccessMessage('저장되었습니다!');
 
       setTimeout(() => setSuccessMessage(null), 3000);
-    } catch {
-      setError('저장에 실패했습니다.');
+    } catch (e) {
+      console.error('World Bible 저장 에러:', e);
+      setError(e instanceof Error ? e.message : '저장에 실패했습니다.');
     } finally {
       setSaving(false);
     }
