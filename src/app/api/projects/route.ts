@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 // GET /api/projects - 프로젝트 목록 조회 (로그인한 사용자의 프로젝트만)
 export async function GET() {
@@ -81,17 +81,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Service Role 클라이언트 생성 및 검증
-    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error('[POST /api/projects] SUPABASE_SERVICE_ROLE_KEY is not set');
-      return NextResponse.json(
-        { error: '서버 설정 오류입니다.' },
-        { status: 500 }
-      );
-    }
-
-    const serviceClient = createServiceRoleClient();
-
     console.log('[POST /api/projects] Creating project:', {
       user_id: user.id,
       title: title.trim(),
@@ -99,8 +88,8 @@ export async function POST(request: NextRequest) {
       target_platform: target_platform || null,
     });
 
-    // 4. 프로젝트 생성 (현재 사용자 ID 매핑)
-    const { data: project, error: projectError } = await serviceClient
+    // 3. 인증된 사용자 클라이언트로 프로젝트 생성 (RLS 정책 준수)
+    const { data: project, error: projectError } = await supabase
       .from('projects')
       .insert({
         user_id: user.id,
@@ -132,8 +121,8 @@ export async function POST(request: NextRequest) {
 
     console.log('[POST /api/projects] Project created:', project.id);
 
-    // 5. 기본 World Bible 생성
-    const { error: wbError } = await serviceClient
+    // 4. 기본 World Bible 생성
+    const { error: wbError } = await supabase
       .from('world_bibles')
       .insert({
         project_id: project.id,
