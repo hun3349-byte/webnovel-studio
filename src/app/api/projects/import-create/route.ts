@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
         title: title.trim(),
         genre: genre || null,
         user_id: user.id,
-        status: 'active',
+        status: 'draft',
         total_episodes: 0,
       })
       .select()
