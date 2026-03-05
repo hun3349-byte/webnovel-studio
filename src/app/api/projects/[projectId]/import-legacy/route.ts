@@ -515,7 +515,7 @@ function buildStoryHooks(
   if (singleMystery && !hooks.some(h => h.summary === singleMystery)) {
     hooks.push({
       project_id: projectId,
-      hook_type: 'ultimate_mystery',
+      hook_type: 'mystery',  // 유효값: foreshadowing, mystery, promise, setup, chekhov_gun
       summary: singleMystery,
       detail: JSON.stringify(data),
       importance: 10,
@@ -561,7 +561,7 @@ function buildStoryHooksFromSeeds(
     if (summary) {
       hooks.push({
         project_id: projectId,
-        hook_type: 'conflict',
+        hook_type: 'setup',  // 유효값: foreshadowing, mystery, promise, setup, chekhov_gun
         summary,
         importance: 6,
         status: 'open',
