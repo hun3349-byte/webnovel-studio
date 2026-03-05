@@ -76,12 +76,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!legacyData || !legacyData.layers) {
+    // 두 가지 구조 지원: { layers: {...} } 또는 { project: { layers: {...} } }
+    let normalizedData: LegacyNarrativeData = legacyData;
+    if (!legacyData.layers && (legacyData as Record<string, unknown>).project) {
+      const projectData = (legacyData as Record<string, unknown>).project as Record<string, unknown>;
+      if (projectData.layers) {
+        normalizedData = { layers: projectData.layers as LegacyNarrativeData['layers'] };
+      }
+    }
+
+    if (!normalizedData || !normalizedData.layers) {
       return NextResponse.json(
         { error: '유효하지 않은 JSON 형식입니다. layers 구조가 필요합니다.' },
         { status: 400 }
       );
     }
+
+    // 이후 로직에서는 normalizedData 사용
+    const processedData = normalizedData;
 
     const result: ImportCreateResult = {
       projectId: '',
@@ -117,7 +129,7 @@ export async function POST(request: NextRequest) {
     // 2단계: World Bible 삽입
     // ============================================
     try {
-      const worldBibleData = buildWorldBibleData(legacyData, project.id);
+      const worldBibleData = buildWorldBibleData(processedData, project.id);
 
       if (worldBibleData) {
         const { error } = await supabase
@@ -140,9 +152,9 @@ export async function POST(request: NextRequest) {
     const charactersToInsert: CharacterInsert[] = [];
 
     // 주인공 (heroArc)
-    if (legacyData.layers.heroArc?.data) {
+    if (processedData.layers?.heroArc?.data) {
       const heroData = buildCharacterData(
-        legacyData.layers.heroArc.data,
+        processedData.layers!.heroArc!.data,
         project.id,
         'protagonist'
       );
@@ -153,9 +165,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 악역 (villainArc)
-    if (legacyData.layers.villainArc?.data) {
+    if (processedData.layers?.villainArc?.data) {
       const villainData = buildCharacterData(
-        legacyData.layers.villainArc.data,
+        processedData.layers!.villainArc!.data,
         project.id,
         'antagonist'
       );
@@ -168,7 +180,7 @@ export async function POST(request: NextRequest) {
     // 추가 캐릭터 레이어들
     const supportingLayers = ['supporting', 'mentor', 'rival', 'heroine', 'sidekick'];
     for (const layerName of supportingLayers) {
-      const layer = legacyData.layers[layerName];
+      const layer = processedData.layers?.[layerName];
       if (layer?.data) {
         const charData = buildCharacterData(layer.data, project.id, 'supporting');
         if (charData) {
@@ -195,18 +207,18 @@ export async function POST(request: NextRequest) {
     const hooksToInsert: StoryHookInsert[] = [];
 
     // ultimateMystery에서 떡밥 추출
-    if (legacyData.layers.ultimateMystery?.data) {
+    if (processedData.layers?.ultimateMystery?.data) {
       const mysteryHooks = buildStoryHooks(
-        legacyData.layers.ultimateMystery.data,
+        processedData.layers!.ultimateMystery!.data,
         project.id
       );
       hooksToInsert.push(...mysteryHooks);
     }
 
     // seeds에서 떡밥 추출
-    if (legacyData.layers.seeds?.data) {
+    if (processedData.layers?.seeds?.data) {
       const seedHooks = buildStoryHooksFromSeeds(
-        legacyData.layers.seeds.data,
+        processedData.layers!.seeds!.data,
         project.id
       );
       hooksToInsert.push(...seedHooks);
@@ -273,7 +285,15 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const legacyData = body.data as LegacyNarrativeData;
+    let legacyData = body.data as LegacyNarrativeData;
+
+    // 두 가지 구조 지원: { layers: {...} } 또는 { project: { layers: {...} } }
+    if (!legacyData?.layers && (legacyData as Record<string, unknown>).project) {
+      const projectData = (legacyData as Record<string, unknown>).project as Record<string, unknown>;
+      if (projectData.layers) {
+        legacyData = { layers: projectData.layers as LegacyNarrativeData['layers'] };
+      }
+    }
 
     if (!legacyData?.layers) {
       return NextResponse.json({ suggestedTitle: null });

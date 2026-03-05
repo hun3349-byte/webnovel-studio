@@ -90,11 +90,19 @@ export async function POST(
 
     // JSON 데이터 파싱
     const body = await request.json();
-    const legacyData: LegacyNarrativeData = body.data;
+    let legacyData: LegacyNarrativeData = body.data;
+
+    // 두 가지 구조 지원: { layers: {...} } 또는 { project: { layers: {...} } }
+    if (!legacyData?.layers && (legacyData as Record<string, unknown>)?.project) {
+      const projectData = (legacyData as Record<string, unknown>).project as Record<string, unknown>;
+      if (projectData?.layers) {
+        legacyData = { layers: projectData.layers as LegacyNarrativeData['layers'] };
+      }
+    }
 
     if (!legacyData || !legacyData.layers) {
       return NextResponse.json(
-        { error: 'Invalid JSON format. Expected { data: { layers: {...} } }' },
+        { error: 'Invalid JSON format. Expected { data: { layers: {...} } } or { data: { project: { layers: {...} } } }' },
         { status: 400 }
       );
     }
