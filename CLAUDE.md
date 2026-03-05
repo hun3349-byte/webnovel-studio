@@ -348,6 +348,76 @@ onHeartbeat: () => {
     - 빈 콘텐츠 체크 (프론트엔드 + 백엔드)
     - 상세 에러 메시지 표시
 
+### 2026-03-05 구현 완료
+
+- [x] **Legacy JSON Import 시스템** (`/api/projects/import-create`, `/api/projects/[projectId]/import-legacy`)
+  - 프로젝트 생성 시 JSON 불러오기 통합 (2탭 모달)
+  - Narrative Simulator JSON 데이터 파싱 및 DB 매핑
+  - World Bible, Characters, Story Hooks 일괄 삽입
+  - 실패 시 롤백 처리
+
+- [x] **World Bible JSON 파싱 버그 수정**
+  - VARCHAR 길이 제한 적용 (world_name: 200, time_period: 100, power_system_name: 100)
+  - JSONB/TEXT[] 배열 필드 기본값 보장
+  - cities, landmarks, factions 배열 텍스트 변환
+  - World Bible 페이지 에러 핸들링 강화 (404 → 빈 폼 표시)
+  - POST 핸들러 추가 (새 World Bible 생성 지원)
+
+- [x] **캐릭터 상세 데이터 매핑 수정**
+  - age (number → "22세" 변환)
+  - origin, faction, coreNarrative → backstory 통합
+  - abilities, strengths → goals/personality 통합
+  - ultimateGoal, surfaceGoal, motivation → goals 통합
+  - fatalWeakness, anxietyConditions 추출
+
+- [x] **Story Hooks 상세 파싱**
+  - surface (표면적 미스터리) 추출
+  - truth (진실/핵심 미스터리) 추출
+  - hints[] → foreshadowing으로 저장
+  - middleTwists[] → setup으로 저장
+  - revealTiming 추출
+
+- [x] **프롬프트 주입기 v6.0** (`src/core/engine/prompt-injector.ts`)
+  - 🚨 **환각 차단 헌법 (ANTI-HALLUCINATION CONSTITUTION)**
+    - 임의 인물 창조 금지 (사형, 동문, 스승의 다른 제자 등)
+    - 임의 문파/세력 창조 금지
+    - 빌런 정체 조기 노출 금지 (삼류 악당식 고백 차단)
+  - 🔒 **절대 설정 앵커링**
+    - 주인공 핵심 설정 앵커 (배경/출신 위반 방지)
+    - 빌런 정체 보호 앵커 (선량한 척 연기 강제)
+    - 궁극의 떡밥 보호 (중요도 9+ 조기 노출 금지)
+  - 📊 **컨텍스트 로딩 검증**
+    - World Bible/Character 로드 상태 로깅
+    - 경고 메시지로 누락 데이터 추적
+  - ✅ **최종 점검 체크리스트** (유저 프롬프트 말미)
+
+---
+
+## 상업적 집필 규칙 (v6.0 - 환각 차단 헌법 추가)
+
+### 환각 차단 헌법 (ANTI-HALLUCINATION LAW)
+
+```
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  🚨🚨🚨 [절대 위반 불가] 환각 차단 헌법 🚨🚨🚨                                  ║
+╠═══════════════════════════════════════════════════════════════════════════════╣
+║  ❌ 1. 임의 인물 창조 금지                                                     ║
+║     - 제공된 【등장인물 데이터베이스】에 없는 인물을 절대 창조하지 마라         ║
+║     - "사형", "동문", "옛 친구" 등 존재하지 않는 관계 날조 금지                ║
+║                                                                               ║
+║  ❌ 2. 임의 문파/세력 창조 금지                                                ║
+║     - 제공된 【세계관 설정】에 없는 문파, 조직, 세력을 만들지 마라            ║
+║     - "1인 전승"이면 동문은 존재하지 않는다                                    ║
+║                                                                               ║
+║  ❌ 3. 궁극의 떡밥 조기 붕괴 금지                                              ║
+║     - 빌런이 "내가 죽였다" 같은 직접 고백은 삼류 전개로 금지                   ║
+║     - 빌런은 표면적으로 선량하고 정의로운 인물인 척 연기해야 함               ║
+║                                                                               ║
+║  ❌ 4. 설정 위반 시 작성 중단                                                  ║
+║     - 캐릭터의 소속, 관계, 배경 설정을 위반하면 에피소드 작성 중단            ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+```
+
 ---
 
 ## 전체 페이지 구조
