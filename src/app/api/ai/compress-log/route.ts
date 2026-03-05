@@ -14,6 +14,17 @@ import type { Json } from '@/types/database';
  */
 export async function POST(request: NextRequest) {
   try {
+    // 인증 확인
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { episodeId, projectId, useMock = false } = body;
 
@@ -23,8 +34,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    const supabase = await createServerSupabaseClient();
 
     // 1. 에피소드 조회
     const { data: episode, error: episodeError } = await supabase

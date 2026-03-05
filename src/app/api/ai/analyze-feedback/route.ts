@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { createClaudeClient } from '@/lib/ai/claude-client';
 
 const FEEDBACK_ANALYSIS_PROMPT = `당신은 웹소설 문체 분석 전문가입니다.
@@ -37,6 +38,17 @@ const FEEDBACK_ANALYSIS_PROMPT = `당신은 웹소설 문체 분석 전문가입
 
 export async function POST(request: NextRequest) {
   try {
+    // 인증 확인
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { originalText, editedText, useMock } = body;
 
@@ -109,8 +121,11 @@ ${editedText}
     return NextResponse.json({ analysis });
   } catch (error) {
     console.error('Feedback analysis error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Analysis failed';
+    const errorDetails = error instanceof Error ? { name: error.name, stack: error.stack } : {};
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Analysis failed' },
+      { error: errorMessage, details: errorDetails },
       { status: 500 }
     );
   }

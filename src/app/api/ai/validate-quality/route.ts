@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import {
   validateEpisode,
   validateFirstEpisode,
@@ -8,6 +9,17 @@ import {
 // POST: 에피소드 퀄리티 검증
 export async function POST(request: NextRequest) {
   try {
+    // 인증 확인
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { content, episodeNumber, mode = 'full' } = body as {
       content: string;
@@ -56,8 +68,11 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('Quality validation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Validation failed';
+    const errorDetails = error instanceof Error ? { name: error.name, stack: error.stack } : {};
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Validation failed' },
+      { error: errorMessage, details: errorDetails },
       { status: 500 }
     );
   }

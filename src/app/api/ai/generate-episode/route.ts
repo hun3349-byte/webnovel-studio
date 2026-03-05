@@ -31,6 +31,17 @@ const MAX_CHAR_COUNT = 6000;
 
 export async function POST(request: NextRequest) {
   try {
+    // 인증 확인 (SSE 스트림 전에 수행)
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const body: EpisodeGenerationRequest = await request.json();
     const {
       projectId,

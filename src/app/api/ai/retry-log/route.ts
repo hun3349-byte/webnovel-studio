@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { requestManualRetry } from '@/core/queue/log-queue-processor';
 
 /**
@@ -9,6 +10,17 @@ import { requestManualRetry } from '@/core/queue/log-queue-processor';
  */
 export async function POST(request: NextRequest) {
   try {
+    // 인증 확인
+    const supabase = await createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { success: false, error: '로그인이 필요합니다.', code: 'UNAUTHORIZED' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { episodeId } = body;
 
@@ -28,11 +40,11 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('로그 재시도 오류:', error);
+    const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류';
+    const errorDetails = error instanceof Error ? { name: error.name, stack: error.stack } : {};
+
     return NextResponse.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : '알 수 없는 오류',
-      },
+      { success: false, error: errorMessage, details: errorDetails },
       { status: 500 }
     );
   }
