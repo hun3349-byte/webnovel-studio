@@ -375,6 +375,34 @@ onHeartbeat: () => {
 
 ---
 
+## 배포 정보
+
+### Vercel 배포 완료 (2026-03-05)
+
+- **Production URL**: https://webnovel-studio.vercel.app
+- **GitHub Repository**: https://github.com/hun3349-byte/webnovel-studio
+
+### 환경 변수 (Vercel Settings)
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://bllgudzcmfzrdjusdnrv.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ... (anon key)
+SUPABASE_SERVICE_ROLE_KEY=eyJ... (service role key)
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### 배포 상태
+
+| URL | 상태 | 설명 |
+|-----|------|------|
+| `/` | ✅ | 메인 페이지 |
+| `/test` | ✅ | Claude API 스트리밍 테스트 |
+| `/projects` | ✅ | 프로젝트 목록 |
+| `/projects/[id]` | ✅ | 프로젝트 대시보드 (사이드바 포함) |
+| `/api/projects` | ✅ | API 정상 응답 |
+
+---
+
 ## 명령어
 
 ```bash
@@ -389,4 +417,7 @@ npx supabase gen types typescript --local > src/types/database.ts
 
 # 마이그레이션 실행
 npx supabase db push
+
+# GitHub 푸시
+git add . && git commit -m "message" && git push origin main
 ```
