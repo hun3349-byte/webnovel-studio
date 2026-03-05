@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
@@ -15,6 +15,12 @@ interface Project {
   updated_at: string;
 }
 
+interface ImportPreview {
+  hasWorldBible: boolean;
+  characterCount: number;
+  layers: string[];
+}
+
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -25,6 +31,15 @@ export default function ProjectsPage() {
   const [newGenre, setNewGenre] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  // 탭 및 JSON Import 상태
+  const [activeTab, setActiveTab] = useState<'empty' | 'import'>('empty');
+  const [jsonFile, setJsonFile] = useState<File | null>(null);
+  const [jsonData, setJsonData] = useState<Record<string, unknown> | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -62,7 +77,48 @@ export default function ProjectsPage() {
     router.refresh();
   };
 
-  const handleCreateProject = async () => {
+  // JSON 파일 선택 핸들러
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setJsonFile(file);
+    setImportError(null);
+    setParsing(true);
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      setJsonData(data);
+
+      // 서버에서 미리보기 정보 가져오기
+      const previewRes = await fetch('/api/projects/import-create', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data }),
+      });
+
+      if (previewRes.ok) {
+        const preview = await previewRes.json();
+        if (preview.suggestedTitle && !newTitle) {
+          setNewTitle(preview.suggestedTitle);
+        }
+        if (preview.genre && !newGenre) {
+          setNewGenre(preview.genre);
+        }
+        setImportPreview(preview.preview);
+      }
+    } catch {
+      setImportError('JSON 파일을 파싱할 수 없습니다. 올바른 형식인지 확인해주세요.');
+      setJsonFile(null);
+      setJsonData(null);
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  // 빈 프로젝트 생성
+  const handleCreateEmptyProject = async () => {
     if (!newTitle.trim()) {
       alert('프로젝트 제목을 입력해주세요.');
       return;
@@ -82,16 +138,84 @@ export default function ProjectsPage() {
       if (!res.ok) throw new Error('Failed to create');
 
       const data = await res.json();
-      setShowModal(false);
-      setNewTitle('');
-      setNewGenre('');
-
-      // Navigate to the new project
+      closeModal();
       router.push(`/projects/${data.project.id}`);
     } catch {
       alert('프로젝트 생성에 실패했습니다.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  // JSON Import로 프로젝트 생성
+  const handleCreateWithImport = async () => {
+    if (!newTitle.trim()) {
+      alert('프로젝트 제목을 입력해주세요.');
+      return;
+    }
+
+    if (!jsonData) {
+      alert('JSON 파일을 먼저 업로드해주세요.');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      const res = await fetch('/api/projects/import-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: newTitle,
+          genre: newGenre || null,
+          data: jsonData,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || '프로젝트 생성에 실패했습니다.');
+      }
+
+      // 성공 알림
+      const summary = result.result;
+      alert(
+        `프로젝트 생성 완료!\n\n` +
+        `- 세계관: ${summary.worldBible ? '가져옴' : '없음'}\n` +
+        `- 캐릭터: ${summary.characters.length}명\n` +
+        `- 떡밥: ${summary.storyHooks}개`
+      );
+
+      closeModal();
+      router.push(result.redirectUrl);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '프로젝트 생성에 실패했습니다.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // 모달 닫기 및 상태 초기화
+  const closeModal = () => {
+    setShowModal(false);
+    setNewTitle('');
+    setNewGenre('');
+    setActiveTab('empty');
+    setJsonFile(null);
+    setJsonData(null);
+    setImportPreview(null);
+    setImportError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // 생성 버튼 핸들러
+  const handleCreateProject = async () => {
+    if (activeTab === 'empty') {
+      await handleCreateEmptyProject();
+    } else {
+      await handleCreateWithImport();
     }
   };
 
@@ -208,12 +332,128 @@ export default function ProjectsPage() {
       {/* Create Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-lg w-full max-w-md">
-            <div className="p-6 border-b border-gray-700">
-              <h2 className="text-xl font-bold">새 프로젝트</h2>
+          <div className="bg-gray-800 rounded-lg w-full max-w-lg">
+            {/* Header with Tabs */}
+            <div className="border-b border-gray-700">
+              <div className="p-4 pb-0">
+                <h2 className="text-xl font-bold mb-4">새 프로젝트</h2>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setActiveTab('empty')}
+                    className={`px-4 py-2 rounded-t-lg font-medium transition ${
+                      activeTab === 'empty'
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                    }`}
+                  >
+                    빈 프로젝트
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('import')}
+                    className={`px-4 py-2 rounded-t-lg font-medium transition flex items-center gap-2 ${
+                      activeTab === 'import'
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+                    }`}
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    JSON 불러오기
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="p-6 space-y-4">
+              {/* Import Tab: File Upload */}
+              {activeTab === 'import' && (
+                <div className="space-y-4">
+                  {/* Hidden File Input */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept=".json"
+                    onChange={handleFileSelect}
+                    className="hidden"
+                  />
+
+                  {/* File Drop Zone */}
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition ${
+                      jsonFile
+                        ? 'border-green-500 bg-green-900/20'
+                        : 'border-gray-600 hover:border-blue-500 hover:bg-gray-700/30'
+                    }`}
+                  >
+                    {parsing ? (
+                      <div className="flex items-center justify-center gap-2 text-gray-400">
+                        <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        <span>파싱 중...</span>
+                      </div>
+                    ) : jsonFile ? (
+                      <div>
+                        <div className="flex items-center justify-center gap-2 text-green-400 mb-2">
+                          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span className="font-medium">{jsonFile.name}</span>
+                        </div>
+                        <p className="text-sm text-gray-400">클릭하여 다른 파일 선택</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <svg className="mx-auto h-10 w-10 text-gray-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <p className="text-gray-300 mb-1">JSON 파일을 선택하세요</p>
+                        <p className="text-xs text-gray-500">Narrative Simulator 데이터 지원</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Import Error */}
+                  {importError && (
+                    <div className="p-3 bg-red-900/30 border border-red-800 rounded-lg text-sm text-red-400">
+                      {importError}
+                    </div>
+                  )}
+
+                  {/* Preview Info */}
+                  {importPreview && (
+                    <div className="p-3 bg-blue-900/20 border border-blue-800/50 rounded-lg">
+                      <h4 className="text-sm font-medium text-blue-400 mb-2">데이터 미리보기</h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <span className={importPreview.hasWorldBible ? 'text-green-400' : 'text-gray-500'}>
+                            {importPreview.hasWorldBible ? '✓' : '✗'}
+                          </span>
+                          <span className="text-gray-300">세계관 설정</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-blue-400">{importPreview.characterCount}</span>
+                          <span className="text-gray-300">캐릭터</span>
+                        </div>
+                      </div>
+                      {importPreview.layers.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {importPreview.layers.map(layer => (
+                            <span key={layer} className="px-2 py-0.5 bg-gray-700 rounded text-xs text-gray-400">
+                              {layer}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Common Fields */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">
                   프로젝트 제목 *
@@ -224,7 +464,7 @@ export default function ProjectsPage() {
                   onChange={e => setNewTitle(e.target.value)}
                   placeholder="예: 검황전설"
                   className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  autoFocus
+                  autoFocus={activeTab === 'empty'}
                 />
               </div>
               <div>
@@ -246,29 +486,51 @@ export default function ProjectsPage() {
                   <option value="기타">기타</option>
                 </select>
               </div>
+
+              {/* Import Mode Hint */}
+              {activeTab === 'import' && !jsonFile && (
+                <p className="text-xs text-gray-500">
+                  JSON 파일을 업로드하면 세계관, 캐릭터, 떡밥이 자동으로 추가됩니다.
+                </p>
+              )}
             </div>
 
             <div className="p-6 border-t border-gray-700 flex justify-end gap-3">
               <button
-                onClick={() => {
-                  setShowModal(false);
-                  setNewTitle('');
-                  setNewGenre('');
-                }}
+                onClick={closeModal}
                 className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition"
               >
                 취소
               </button>
               <button
                 onClick={handleCreateProject}
-                disabled={creating || !newTitle.trim()}
-                className={`px-4 py-2 rounded-lg font-medium transition ${
-                  creating || !newTitle.trim()
+                disabled={creating || !newTitle.trim() || (activeTab === 'import' && !jsonData)}
+                className={`px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 ${
+                  creating || !newTitle.trim() || (activeTab === 'import' && !jsonData)
                     ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                    : activeTab === 'import'
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white'
                     : 'bg-blue-600 hover:bg-blue-700 text-white'
                 }`}
               >
-                {creating ? '생성 중...' : '만들기'}
+                {creating ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>생성 중...</span>
+                  </>
+                ) : activeTab === 'import' ? (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    </svg>
+                    <span>데이터 불러와서 만들기</span>
+                  </>
+                ) : (
+                  '만들기'
+                )}
               </button>
             </div>
           </div>
