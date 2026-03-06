@@ -22,7 +22,9 @@ export function createClaudeClient(): Anthropic {
 
 // 기본 모델 설정
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514';
-const MAX_TOKENS = 8192; // 6,000자 + 여유분
+// ★★★ 에피소드 생성용 최대 토큰 (절대 변경 금지) ★★★
+// 한글 6,000자 ≈ 약 4,000~5,000 토큰 + 여유분 = 8192
+const MAX_TOKENS = 8192;
 
 /**
  * 스트리밍 옵션

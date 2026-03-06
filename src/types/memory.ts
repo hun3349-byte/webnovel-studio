@@ -69,6 +69,9 @@ export interface SlidingWindowContext {
   // 마지막 문장 앵커 (직전 회차의 마지막 500자)
   lastSceneAnchor: string;
 
+  // ★★★ 직전 회차 본문 마지막 1500자 (이어쓰기 강제용) ★★★
+  previousEpisodeEnding?: string;
+
   // 현재 활성 캐릭터들의 상태
   activeCharacters: CharacterCurrentState[];
 

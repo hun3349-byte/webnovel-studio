@@ -82,9 +82,11 @@ export async function POST(request: NextRequest) {
         );
 
         // 5. Claude API 스트리밍 호출
+        // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★
         const result = await generateEpisodeStreaming({
           systemPrompt,
           userPrompt,
+          maxTokens: 8192, // 절대 변경 금지 - 6,000자 분량 보장
           temperature: 0.8,
 
           // TTFB 방어: 스트림 시작 전 즉시 Heartbeat 전송

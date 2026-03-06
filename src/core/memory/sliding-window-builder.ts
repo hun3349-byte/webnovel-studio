@@ -49,6 +49,7 @@ export async function buildSlidingWindowContext(
     unresolvedHooksResult,
     writingMemoriesResult,
     timelineEventsResult,
+    previousEpisodeResult,
   ] = await Promise.all([
     // 1. World Bible 조회
     supabase
@@ -96,6 +97,17 @@ export async function buildSlidingWindowContext(
           p_episode_number: targetEpisodeNumber,
         })
       : Promise.resolve({ data: [], error: null }),
+
+    // 7. ★★★ 직전 회차 에피소드 본문 조회 (이어쓰기용) ★★★
+    // 2화 이상 생성 시 1화의 본문을 직접 가져와야 완벽한 이어쓰기 가능
+    targetEpisodeNumber > 1
+      ? supabase
+          .from('episodes')
+          .select('content, episode_number')
+          .eq('project_id', projectId)
+          .eq('episode_number', targetEpisodeNumber - 1)
+          .single()
+      : Promise.resolve({ data: null, error: null }),
   ]);
 
   // 에러 처리
@@ -170,8 +182,23 @@ export async function buildSlidingWindowContext(
     confidence: mem.confidence ?? 0.5,
   }));
 
-  // 직전 회차의 마지막 500자 추출
+  // 직전 회차의 마지막 500자 추출 (기존 로그 기반)
   const lastSceneAnchor = recentLogs.length > 0 ? recentLogs[0].last500Chars : '';
+
+  // ★★★ 직전 회차 본문에서 마지막 1500자 추출 (이어쓰기 강제용) ★★★
+  let previousEpisodeEnding = '';
+  if (previousEpisodeResult.data?.content) {
+    const fullContent = previousEpisodeResult.data.content;
+    // 마지막 1500자 추출 (충분한 컨텍스트 제공)
+    previousEpisodeEnding = fullContent.slice(-1500);
+    console.log('[SlidingWindowBuilder] 직전 회차 본문 로드됨:', {
+      episodeNumber: previousEpisodeResult.data.episode_number,
+      totalLength: fullContent.length,
+      extractedLength: previousEpisodeEnding.length,
+    });
+  } else if (targetEpisodeNumber > 1) {
+    console.warn('[SlidingWindowBuilder] ⚠️ 직전 회차 본문을 찾을 수 없음! 이어쓰기 품질 저하 가능');
+  }
 
   // 타임라인 이벤트 변환
   const activeTimelineEvents: TimelineEvent[] = (timelineEventsResult.data || []).map(
@@ -222,6 +249,7 @@ export async function buildSlidingWindowContext(
     worldBible: worldBibleResult.data,
     recentLogs,
     lastSceneAnchor,
+    previousEpisodeEnding, // ★★★ 직전 회차 마지막 1500자 (이어쓰기 강제용) ★★★
     activeCharacters,
     unresolvedHooks,
     writingPreferences,
