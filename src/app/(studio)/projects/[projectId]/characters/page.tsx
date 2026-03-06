@@ -44,6 +44,25 @@ const ROLE_COLORS: Record<string, string> = {
   extra: 'bg-gray-600',
 };
 
+// Tier 시스템 상수
+const TIER_LABELS: Record<number, string> = {
+  1: '서브 주인공',
+  2: '주요 조연',
+  3: '엑스트라',
+};
+
+const TIER_COLORS: Record<number, string> = {
+  1: 'bg-yellow-600 text-yellow-100',
+  2: 'bg-purple-600 text-purple-100',
+  3: 'bg-gray-600 text-gray-300',
+};
+
+const TIER_DESCRIPTIONS: Record<number, string> = {
+  1: '메인 플롯에 깊이 개입하는 핵심 인물',
+  2: '서브플롯을 이끄는 중요 인물',
+  3: '배경 인물 (독자 반응 시 격상 가능)',
+};
+
 export default function CharactersPage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -264,12 +283,32 @@ export default function CharactersPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {characters.map(character => (
+            {characters.map(character => {
+              const tier = (character.additional_data?.tier as number) || 3;
+              const isAutoExtracted = Boolean(character.additional_data?.is_auto_extracted);
+              const confidence = character.additional_data?.extraction_confidence;
+
+              return (
               <div
                 key={character.id}
-                className="bg-gray-800 rounded-lg p-4 hover:bg-gray-750 transition cursor-pointer"
+                className={`bg-gray-800 rounded-lg p-4 hover:bg-gray-750 transition cursor-pointer ${
+                  isAutoExtracted ? 'border-l-4 border-yellow-500' : ''
+                }`}
                 onClick={() => handleEditCharacter(character)}
               >
+                {/* 자동 추출 표시 */}
+                {isAutoExtracted && (
+                  <div className="flex items-center gap-2 mb-2 text-xs text-yellow-400">
+                    <span>🤖</span>
+                    <span>AI 자동 추출</span>
+                    {typeof confidence === 'number' && (
+                      <span className="text-gray-500">
+                        (신뢰도 {Math.round(confidence * 100)}%)
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <h3 className="font-semibold text-lg flex items-center gap-2">
@@ -278,15 +317,24 @@ export default function CharactersPage() {
                         <span className="text-xs bg-gray-700 px-2 py-0.5 rounded">사망</span>
                       )}
                     </h3>
-                    {character.role && (
+                    <div className="flex items-center gap-2 mt-1">
+                      {character.role && (
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded ${
+                            ROLE_COLORS[character.role] || 'bg-gray-600'
+                          }`}
+                        >
+                          {ROLE_LABELS[character.role] || character.role}
+                        </span>
+                      )}
+                      {/* Tier 뱃지 */}
                       <span
-                        className={`text-xs px-2 py-0.5 rounded ${
-                          ROLE_COLORS[character.role] || 'bg-gray-600'
-                        }`}
+                        className={`text-xs px-2 py-0.5 rounded ${TIER_COLORS[tier]}`}
+                        title={TIER_DESCRIPTIONS[tier]}
                       >
-                        {ROLE_LABELS[character.role] || character.role}
+                        Tier {tier}: {TIER_LABELS[tier]}
                       </span>
-                    )}
+                    </div>
                   </div>
                   <button
                     onClick={e => {
@@ -325,7 +373,8 @@ export default function CharactersPage() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -369,6 +418,75 @@ export default function CharactersPage() {
                   </select>
                 </div>
               </div>
+
+              {/* Tier 업그레이드 섹션 (기존 캐릭터 편집 시에만 표시) */}
+              {editingCharacter && (
+                <div className="bg-gradient-to-r from-purple-900/30 to-yellow-900/30 border border-purple-700/50 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-purple-300 mb-3 flex items-center gap-2">
+                    <span>⭐</span>
+                    캐릭터 등급 (Tier) 설정
+                  </h3>
+                  <p className="text-xs text-gray-400 mb-3">
+                    등급이 높을수록 AI가 해당 인물을 메인 플롯에 깊이 개입시킵니다.
+                  </p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[1, 2, 3].map(tier => {
+                      const currentTier = (editingCharacter.additional_data?.tier as number) || 3;
+                      const isSelected = currentTier === tier;
+                      return (
+                        <button
+                          key={tier}
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            try {
+                              const res = await fetch(
+                                `/api/projects/${projectId}/characters/${editingCharacter.id}/upgrade`,
+                                {
+                                  method: 'PATCH',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ tier }),
+                                }
+                              );
+                              if (res.ok) {
+                                loadCharacters();
+                                // 현재 편집 중인 캐릭터 정보 업데이트
+                                const updatedChar = { ...editingCharacter };
+                                updatedChar.additional_data = {
+                                  ...(updatedChar.additional_data || {}),
+                                  tier,
+                                };
+                                setEditingCharacter(updatedChar);
+                              } else {
+                                alert('등급 변경에 실패했습니다.');
+                              }
+                            } catch {
+                              alert('등급 변경 중 오류가 발생했습니다.');
+                            }
+                          }}
+                          className={`p-3 rounded-lg text-left transition ${
+                            isSelected
+                              ? TIER_COLORS[tier] + ' ring-2 ring-white'
+                              : 'bg-gray-700 hover:bg-gray-600'
+                          }`}
+                        >
+                          <div className="font-semibold text-sm">
+                            Tier {tier}: {TIER_LABELS[tier]}
+                          </div>
+                          <div className="text-xs mt-1 opacity-80">
+                            {TIER_DESCRIPTIONS[tier]}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {Boolean(editingCharacter.additional_data?.is_auto_extracted) && (
+                    <div className="mt-3 p-2 bg-yellow-900/30 rounded text-xs text-yellow-300 flex items-center gap-2">
+                      <span>🤖</span>
+                      <span>이 캐릭터는 AI가 자동 추출한 인물입니다. 독자 반응이 좋으면 등급을 올려주세요!</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>

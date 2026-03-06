@@ -121,7 +121,21 @@ export interface CharacterCurrentState {
   speechPattern?: string | null;
   appearance?: string | null;
   goals?: string[];
+  // 동적 캐릭터 관리용 추가 데이터
+  additionalData?: {
+    is_auto_extracted?: boolean;
+    extraction_confidence?: number;
+    first_action?: string;
+    initial_relationship?: string;
+    tier?: 1 | 2 | 3;
+    tier_upgraded_at?: string;
+    previous_tier?: number;
+    [key: string]: unknown;
+  } | null;
 }
+
+// ActiveCharacter 별칭 (prompt-injector 호환용)
+export type ActiveCharacter = CharacterCurrentState;
 
 /**
  * 캐릭터 상태 변화 (에피소드별)

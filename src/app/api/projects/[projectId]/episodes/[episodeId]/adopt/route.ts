@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callCompressLogApi } from '@/core/queue/log-queue-processor';
 
+/**
+ * 캐릭터 추출 API 호출 (백그라운드)
+ */
+async function callCharacterExtractionApi(
+  episodeId: string,
+  projectId: string
+): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const response = await fetch(`${baseUrl}/api/ai/extract-characters`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ episodeId, projectId, useMock: false }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return { success: false, error: errorData.error || `HTTP ${response.status}` };
+    }
+
+    const data = await response.json();
+    return { success: true, data: data.result };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
 interface RouteParams {
   params: Promise<{ projectId: string; episodeId: string }>;
 }
@@ -125,6 +155,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       })
       .catch((err) => {
         console.error('Log compression error:', err);
+      });
+
+    // 8. ★ 캐릭터 자동 추출 (백그라운드)
+    // 새로 등장한 인물을 자동으로 감지하여 DB에 저장
+    callCharacterExtractionApi(episodeId, projectId)
+      .then((result) => {
+        if (result.success) {
+          console.log('[Adopt] 캐릭터 추출 완료:', result.data);
+        } else {
+          console.warn('[Adopt] 캐릭터 추출 실패:', result.error);
+        }
+      })
+      .catch((err) => {
+        console.error('[Adopt] 캐릭터 추출 에러:', err);
       });
 
     return NextResponse.json({

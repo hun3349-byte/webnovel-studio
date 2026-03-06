@@ -1,5 +1,6 @@
-import type { SlidingWindowContext, TimelineEvent } from '@/types/memory';
+import type { SlidingWindowContext, TimelineEvent, ActiveCharacter } from '@/types/memory';
 import { buildWritingMemoryPrompt, logInjectedRules } from '@/lib/utils/writing-memory';
+import { CHARACTER_TIERS, CharacterTier } from '@/core/memory/character-extractor';
 
 // Writing Memory 시스템 규칙 로드 확인 (서버 시작 시 1회)
 if (typeof window === 'undefined') {
@@ -271,11 +272,76 @@ PD가 지적한 이전 화의 실수를 절대 반복하지 마라.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
 /**
+ * Tier 기반 캐릭터 강조 프롬프트 생성
+ * - Tier 1 (서브 주인공): 메인 플롯에 깊이 개입
+ * - Tier 2 (주요 조연): 서브플롯 담당
+ * - Tier 3 (엑스트라): 배경 인물
+ */
+export function buildTierBasedCharacterEmphasis(characters: ActiveCharacter[]): string {
+  if (!characters || characters.length === 0) return '';
+
+  // Tier별 분류
+  const tier1Chars = characters.filter(c => {
+    const additionalData = c.additionalData as Record<string, unknown> | null;
+    return additionalData?.tier === 1 || c.role === 'protagonist';
+  });
+
+  const tier2Chars = characters.filter(c => {
+    const additionalData = c.additionalData as Record<string, unknown> | null;
+    return additionalData?.tier === 2 || c.role === 'antagonist';
+  });
+
+  if (tier1Chars.length === 0 && tier2Chars.length === 0) return '';
+
+  const sections: string[] = [];
+
+  sections.push(`
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  ⭐ [핵심 인물 비중 조정] CHARACTER TIER DIRECTIVE                           ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+`);
+
+  // Tier 1: 서브 주인공급
+  if (tier1Chars.length > 0) {
+    sections.push(`
+▶ [Tier 1 - 핵심 인물] 메인 플롯에 적극 개입시킬 것:
+${tier1Chars.map(c => `   ⭐ ${c.name}: 이 인물의 행동과 결정이 스토리 전개에 중요한 영향을 미치도록 작성
+      ${c.personality ? `- 성격: ${c.personality}` : ''}
+      ${c.goals?.length ? `- 목표: ${c.goals.join(', ')}` : ''}`).join('\n')}
+`);
+  }
+
+  // Tier 2: 주요 조연
+  if (tier2Chars.length > 0) {
+    sections.push(`
+▶ [Tier 2 - 주요 조연] 서브플롯에서 비중있게 다룰 것:
+${tier2Chars.map(c => `   ★ ${c.name}: 주인공과의 상호작용에서 의미있는 역할 부여
+      ${c.backstory ? `- 배경: ${c.backstory.substring(0, 100)}...` : ''}`).join('\n')}
+`);
+  }
+
+  sections.push(`
+🚨 위 Tier 1, 2 인물들은 단순 배경이 아닌 스토리의 핵심 축으로 활용하라.
+🚨 이들의 대사, 행동, 심리 묘사에 충분한 분량을 할애하라.
+`);
+
+  return sections.join('\n');
+}
+
+/**
  * 절대 설정 앵커 생성 (시스템 프롬프트 최상단용)
  * - 주인공/빌런의 핵심 설정을 강력하게 앵커링
  */
 export function buildAbsoluteSettingsAnchor(context: SlidingWindowContext): string {
   const sections: string[] = [];
+
+  // Tier 기반 캐릭터 강조 추가
+  if (context.activeCharacters) {
+    const tierEmphasis = buildTierBasedCharacterEmphasis(context.activeCharacters);
+    if (tierEmphasis) {
+      sections.push(tierEmphasis);
+    }
+  }
 
   // 주인공 절대 설정
   const protagonist = context.activeCharacters?.find(c => c.role === 'protagonist');
