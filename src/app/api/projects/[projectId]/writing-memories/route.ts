@@ -43,10 +43,11 @@ export async function GET(
 
     // 타입별 그룹화
     const byType = (memories || []).reduce((acc, mem) => {
-      if (!acc[mem.feedback_type]) {
-        acc[mem.feedback_type] = [];
+      const type = mem.feedback_type || 'unknown';
+      if (!acc[type]) {
+        acc[type] = [];
       }
-      acc[mem.feedback_type].push(mem);
+      acc[type].push(mem);
       return acc;
     }, {} as Record<string, typeof memories>);
 

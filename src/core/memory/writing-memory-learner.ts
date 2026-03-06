@@ -58,13 +58,15 @@ export async function getWritingMemoryContext(
   }
 
   // WritingPreference 형식으로 변환
-  const preferences: WritingPreference[] = memories.map(mem => ({
-    feedbackType: mem.feedback_type,
-    preferenceSummary: mem.preference_summary,
-    avoidPatterns: mem.avoid_patterns || [],
-    favorPatterns: mem.favor_patterns || [],
-    confidence: mem.confidence || 0.5,
-  }));
+  const preferences: WritingPreference[] = memories
+    .filter(mem => mem.feedback_type) // null인 경우 제외
+    .map(mem => ({
+      feedbackType: mem.feedback_type!,
+      preferenceSummary: mem.preference_summary || '',
+      avoidPatterns: mem.avoid_patterns || [],
+      favorPatterns: mem.favor_patterns || [],
+      confidence: mem.confidence || 0.5,
+    }));
 
   // 모든 패턴 수집 (중복 제거)
   const allAvoidPatterns = new Set<string>();

@@ -174,13 +174,15 @@ export async function buildSlidingWindowContext(
     keywords: hook.keywords || [],
   }));
 
-  const writingPreferences: WritingPreference[] = (writingMemoriesResult.data || []).map(mem => ({
-    feedbackType: mem.feedback_type,
-    preferenceSummary: mem.preference_summary,
-    avoidPatterns: mem.avoid_patterns || [],
-    favorPatterns: mem.favor_patterns || [],
-    confidence: mem.confidence ?? 0.5,
-  }));
+  const writingPreferences: WritingPreference[] = (writingMemoriesResult.data || [])
+    .filter(mem => mem.feedback_type) // null인 경우 제외
+    .map(mem => ({
+      feedbackType: mem.feedback_type!,
+      preferenceSummary: mem.preference_summary || '',
+      avoidPatterns: mem.avoid_patterns || [],
+      favorPatterns: mem.favor_patterns || [],
+      confidence: mem.confidence ?? 0.5,
+    }));
 
   // 직전 회차의 마지막 500자 추출 (기존 로그 기반)
   const lastSceneAnchor = recentLogs.length > 0 ? recentLogs[0].last500Chars : '';
@@ -201,43 +203,25 @@ export async function buildSlidingWindowContext(
   }
 
   // 타임라인 이벤트 변환
-  const activeTimelineEvents: TimelineEvent[] = (timelineEventsResult.data || []).map(
-    (event: {
-      id: string;
-      event_name: string;
-      event_type: string;
-      episode_start: number;
-      episode_end: number;
-      location: string | null;
-      main_conflict: string | null;
-      objectives: string[] | null;
-      constraints: string[] | null;
-      foreshadowing_seeds: string[] | null;
-      key_characters: string[] | null;
-      character_focus: string | null;
-      tone: string | null;
-      pacing: string | null;
-      importance: number;
-      status: string;
-    }) => ({
-      id: event.id,
-      eventName: event.event_name,
-      eventType: event.event_type as TimelineEvent['eventType'],
-      episodeStart: event.episode_start,
-      episodeEnd: event.episode_end,
-      location: event.location,
-      mainConflict: event.main_conflict,
-      objectives: event.objectives || [],
-      constraints: event.constraints || [],
-      foreshadowingSeeds: event.foreshadowing_seeds || [],
-      keyCharacters: event.key_characters || [],
-      characterFocus: event.character_focus,
-      tone: event.tone,
-      pacing: event.pacing as TimelineEvent['pacing'],
-      importance: event.importance,
-      status: event.status as TimelineEvent['status'],
-    })
-  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const activeTimelineEvents: TimelineEvent[] = (timelineEventsResult.data || []).map((event: any) => ({
+    id: event.id,
+    eventName: event.event_name,
+    eventType: event.event_type as TimelineEvent['eventType'],
+    episodeStart: event.episode_start,
+    episodeEnd: event.episode_end,
+    location: event.location,
+    mainConflict: event.main_conflict,
+    objectives: event.objectives || [],
+    constraints: event.constraints || [],
+    foreshadowingSeeds: event.foreshadowing_seeds || [],
+    keyCharacters: event.key_characters || [],
+    characterFocus: event.character_focus,
+    tone: event.tone,
+    pacing: event.pacing as TimelineEvent['pacing'],
+    importance: event.importance,
+    status: event.status as TimelineEvent['status'],
+  }));
 
   // 현재 아크 요약 계산
   const currentArcSummary = calculateCurrentArcSummary(
