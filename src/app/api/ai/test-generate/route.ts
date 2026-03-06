@@ -18,12 +18,14 @@ import { buildSlidingWindowContext } from '@/core/memory/sliding-window-builder'
 // - TTFB 방어를 위한 Heartbeat 포함
 // - SSE (Server-Sent Events) 방식
 // - Mock 모드 지원 (API 없이 테스트)
+// - Edge Runtime: Vercel 서버리스 15초 타임아웃 우회
 // ============================================================================
 
-export const runtime = 'nodejs';
+// Edge Runtime 강제 설정 (Vercel Serverless 15초 제한 우회)
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
-// 최대 실행 시간 설정 (Vercel Pro: 60초, Hobby: 10초)
+// 최대 실행 시간 설정 (Edge: 최대 30초, Vercel Pro: 60초)
 export const maxDuration = 60;
 
 // Mock 에피소드 텍스트 (무협 세계관) - v2.0 Show Don't Tell 강화

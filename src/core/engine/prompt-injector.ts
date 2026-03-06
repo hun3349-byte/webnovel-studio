@@ -1,4 +1,4 @@
-import type { SlidingWindowContext } from '@/types/memory';
+import type { SlidingWindowContext, TimelineEvent } from '@/types/memory';
 import { buildWritingMemoryPrompt, logInjectedRules } from '@/lib/utils/writing-memory';
 
 // Writing Memory 시스템 규칙 로드 확인 (서버 시작 시 1회)
@@ -192,9 +192,24 @@ PD가 지적한 이전 화의 실수를 절대 반복하지 마라.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-                         【분량 규칙: 4,000~6,000자】
+                    【분량 규칙: 4,000~6,000자 (필수)】
 
-공백 포함 4,000자 ~ 6,000자를 반드시 작성하세요. 4,000자 미만은 절대 불가입니다.
+🚨🚨🚨 절대 분량 규칙 🚨🚨🚨
+
+✅ 공백 포함 4,000자 ~ 6,000자를 반드시 작성하세요.
+❌ 4,000자 미만은 절대 불가입니다. 2,500자에서 끊으면 실패입니다.
+❌ 중간에 이야기를 마무리하거나 끊지 마세요. 반드시 끝까지 작성하세요.
+
+📝 분량 확보 전략 (반드시 적용):
+1. 모든 액션 장면은 동작 하나하나를 세밀하게 분해하여 묘사하라
+2. 대화 사이사이에 인물의 표정, 손동작, 시선, 호흡 등을 길게 묘사하라
+3. 배경과 분위기 묘사를 풍성하게 추가하라 (냄새, 소리, 촉감, 온도)
+4. 인물의 내면 갈등과 심리 묘사를 깊게 파고들어라
+5. 하나의 장면을 최소 800~1000자 이상 작성하라
+6. 전체 에피소드에 최소 4~5개의 장면을 포함하라
+
+⚠️ 절대 금지: "이야기를 마무리한다", "여기서 끝낸다" 같은 조기 종료 금지
+⚠️ 절대 금지: 요약하거나 축약하지 말 것. 모든 것을 풀어서 상세히 작성할 것
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -264,6 +279,138 @@ ${criticalHooks.map(h => `▶ [중요도 ${h.importance}/10] ${h.summary}`).join
 🚨 인물이 대사로 직접 밝히는 것은 삼류 전개. 암시와 복선으로만 처리하라.
 `);
   }
+
+  return sections.join('\n');
+}
+
+/**
+ * 메인 플롯 지시문 생성 (Main Plot Directive)
+ * - 타임라인 이벤트 기반 거시적 스토리 방향 앵커링
+ * - AI가 PD가 계획한 플롯에서 이탈하지 않도록 강제
+ */
+export function buildMainPlotDirective(context: SlidingWindowContext): string {
+  if (!context.activeTimelineEvents || context.activeTimelineEvents.length === 0) {
+    return '';
+  }
+
+  const sections: string[] = [];
+
+  // 현재 아크 위치 표시
+  if (context.currentArcSummary) {
+    const arc = context.currentArcSummary;
+    const positionLabels: Record<string, string> = {
+      start: '초반 (설정/진입)',
+      middle: '중반 (전개)',
+      climax: '클라이맥스 (최고조)',
+      end: '종반 (마무리/전환)',
+    };
+
+    sections.push(`
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  📍 [현재 스토리 위치] 거시적 흐름 앵커                                        ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+▶ 현재 아크: 【${arc.arcName}】
+▶ 진행 위치: ${positionLabels[arc.position] || arc.position} (${arc.progressPercentage}% 진행)
+▶ 핵심 방향: ${arc.mainDirective}
+`);
+  }
+
+  // 메인 플롯 지시문 헤더
+  sections.push(`
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃  🎯 [이번 화 핵심 플롯 지시문] MAIN PLOT DIRECTIVE                            ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+🚨 아래 지시사항은 PD가 계획한 거시적 스토리 흐름입니다.
+🚨 이 방향에서 이탈하는 전개는 절대 금지합니다.
+`);
+
+  // 이벤트 타입별 라벨
+  const eventTypeLabels: Record<string, string> = {
+    arc_start: '아크 시작',
+    arc_climax: '클라이맥스',
+    arc_end: '아크 종료',
+    major_conflict: '주요 충돌',
+    milestone: '마일스톤',
+    turning_point: '전환점',
+    setup: '설정 구간',
+    cooldown: '휴식 구간',
+  };
+
+  const pacingLabels: Record<string, string> = {
+    slow: '느린 전개 (설정/대화 중심)',
+    moderate: '보통 전개',
+    fast: '빠른 전개 (액션/위기)',
+    climactic: '최고조 (절정)',
+  };
+
+  // 활성 이벤트별 지시사항
+  context.activeTimelineEvents.forEach((event: TimelineEvent, index: number) => {
+    let eventSection = `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 이벤트 ${index + 1}: 【${event.eventName}】 [${eventTypeLabels[event.eventType] || event.eventType}]
+   - 적용 범위: ${event.episodeStart}화 ~ ${event.episodeEnd}화
+   ${event.location ? `- 주요 무대: ${event.location}` : ''}
+   ${event.pacing ? `- 전개 속도: ${pacingLabels[event.pacing] || event.pacing}` : ''}
+   ${event.tone ? `- 분위기: ${event.tone}` : ''}
+`;
+
+    if (event.mainConflict) {
+      eventSection += `
+▶ 핵심 갈등:
+   ${event.mainConflict}
+`;
+    }
+
+    if (event.objectives.length > 0) {
+      eventSection += `
+▶ 이번 구간에서 달성해야 할 목표:
+${event.objectives.map(obj => `   ✅ ${obj}`).join('\n')}
+`;
+    }
+
+    if (event.constraints.length > 0) {
+      eventSection += `
+▶ 절대 하면 안 되는 것 (제약 조건):
+${event.constraints.map(con => `   ❌ ${con}`).join('\n')}
+`;
+    }
+
+    if (event.foreshadowingSeeds.length > 0) {
+      eventSection += `
+▶ 이 구간에서 뿌려야 할 복선:
+${event.foreshadowingSeeds.map(seed => `   💡 ${seed}`).join('\n')}
+`;
+    }
+
+    if (event.characterFocus) {
+      eventSection += `
+▶ 캐릭터 포커스: ${event.characterFocus}
+`;
+    }
+
+    sections.push(eventSection);
+  });
+
+  // 거시적 흐름 이탈 방지 규칙
+  sections.push(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨🚨🚨 [거시적 흐름 이탈 방지 규칙] 🚨🚨🚨
+
+1. 위 목표(✅)들 중 최소 하나는 이번 화에서 진전이 있어야 한다.
+2. 위 제약(❌)을 위반하는 전개는 절대 금지한다.
+3. 복선(💡)은 자연스럽게 암시만 하고, 직접 설명하지 않는다.
+4. 갑작스러운 새 스토리라인 도입은 위 맥락과 연결되어야 한다.
+5. 이 구간의 분위기(톤)와 전개 속도(페이싱)를 유지하라.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`);
+
+  console.log('[PromptInjector] 타임라인 이벤트 주입됨:', {
+    eventCount: context.activeTimelineEvents.length,
+    arcName: context.currentArcSummary?.arcName || '없음',
+    progress: context.currentArcSummary?.progressPercentage || 0,
+  });
 
   return sections.join('\n');
 }
@@ -534,11 +681,15 @@ export function buildEpisodeGenerationPrompts(
   // 4. Writing Memory (학습된 문체 규칙) 주입
   const writingMemoryPrompt = buildWritingMemoryPrompt();
 
-  // 5. 시스템 프롬프트 조립 순서:
-  //    환각 차단 헌법 → 절대 설정 앵커 → 기본 페르소나 → 학습된 문체 규칙
+  // 5. 타임라인 이벤트 기반 핵심 플롯 지시문 (Main Plot Directive)
+  const mainPlotDirective = buildMainPlotDirective(context);
+
+  // 6. 시스템 프롬프트 조립 순서:
+  //    환각 차단 헌법 → 절대 설정 앵커 → 핵심 플롯 지시문 → 기본 페르소나 → 학습된 문체 규칙
   const systemPrompt = [
     ANTI_HALLUCINATION_CONSTITUTION,
     absoluteSettingsAnchor,
+    mainPlotDirective,
     COMMERCIAL_WRITER_SYSTEM_PROMPT,
     writingMemoryPrompt,
   ].filter(Boolean).join('\n');

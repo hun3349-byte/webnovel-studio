@@ -6,6 +6,8 @@ import type {
   UnresolvedHook,
   WritingPreference,
   LongTermMemoryResult,
+  TimelineEvent,
+  CurrentArcSummary,
 } from '@/types/memory';
 
 /**
@@ -27,12 +29,14 @@ export async function buildSlidingWindowContext(
     windowSize?: number;
     longTermSearchQueries?: string[];
     includeWritingPreferences?: boolean;
+    includeTimelineEvents?: boolean;
   } = {}
 ): Promise<SlidingWindowContext> {
   const {
     windowSize = 3,
     longTermSearchQueries = [],
     includeWritingPreferences = true,
+    includeTimelineEvents = true,
   } = options;
 
   const supabase = await createServerSupabaseClient();
@@ -44,6 +48,7 @@ export async function buildSlidingWindowContext(
     charactersResult,
     unresolvedHooksResult,
     writingMemoriesResult,
+    timelineEventsResult,
   ] = await Promise.all([
     // 1. World Bible 조회
     supabase
@@ -82,6 +87,14 @@ export async function buildSlidingWindowContext(
           .gte('confidence', 0.6)
           .order('confidence', { ascending: false })
           .limit(10)
+      : Promise.resolve({ data: [], error: null }),
+
+    // 6. 타임라인 이벤트 조회 (현재 회차에 해당하는 이벤트)
+    includeTimelineEvents
+      ? supabase.rpc('get_active_timeline_events', {
+          p_project_id: projectId,
+          p_episode_number: targetEpisodeNumber,
+        })
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -160,6 +173,51 @@ export async function buildSlidingWindowContext(
   // 직전 회차의 마지막 500자 추출
   const lastSceneAnchor = recentLogs.length > 0 ? recentLogs[0].last500Chars : '';
 
+  // 타임라인 이벤트 변환
+  const activeTimelineEvents: TimelineEvent[] = (timelineEventsResult.data || []).map(
+    (event: {
+      id: string;
+      event_name: string;
+      event_type: string;
+      episode_start: number;
+      episode_end: number;
+      location: string | null;
+      main_conflict: string | null;
+      objectives: string[] | null;
+      constraints: string[] | null;
+      foreshadowing_seeds: string[] | null;
+      key_characters: string[] | null;
+      character_focus: string | null;
+      tone: string | null;
+      pacing: string | null;
+      importance: number;
+      status: string;
+    }) => ({
+      id: event.id,
+      eventName: event.event_name,
+      eventType: event.event_type as TimelineEvent['eventType'],
+      episodeStart: event.episode_start,
+      episodeEnd: event.episode_end,
+      location: event.location,
+      mainConflict: event.main_conflict,
+      objectives: event.objectives || [],
+      constraints: event.constraints || [],
+      foreshadowingSeeds: event.foreshadowing_seeds || [],
+      keyCharacters: event.key_characters || [],
+      characterFocus: event.character_focus,
+      tone: event.tone,
+      pacing: event.pacing as TimelineEvent['pacing'],
+      importance: event.importance,
+      status: event.status as TimelineEvent['status'],
+    })
+  );
+
+  // 현재 아크 요약 계산
+  const currentArcSummary = calculateCurrentArcSummary(
+    activeTimelineEvents,
+    targetEpisodeNumber
+  );
+
   return {
     worldBible: worldBibleResult.data,
     recentLogs,
@@ -168,6 +226,54 @@ export async function buildSlidingWindowContext(
     unresolvedHooks,
     writingPreferences,
     longTermMemories: longTermMemories.length > 0 ? longTermMemories : undefined,
+    activeTimelineEvents: activeTimelineEvents.length > 0 ? activeTimelineEvents : undefined,
+    currentArcSummary,
+  };
+}
+
+/**
+ * 현재 아크 위치 계산
+ */
+function calculateCurrentArcSummary(
+  events: TimelineEvent[],
+  currentEpisode: number
+): CurrentArcSummary | undefined {
+  if (events.length === 0) return undefined;
+
+  // 아크 관련 이벤트 찾기 (arc_start, arc_climax, arc_end)
+  const arcEvent = events.find(
+    (e) =>
+      e.eventType === 'arc_start' ||
+      e.eventType === 'arc_climax' ||
+      e.eventType === 'arc_end'
+  );
+
+  // 아크 이벤트가 없으면 가장 중요한 이벤트로 대체
+  const mainEvent = arcEvent || events[0];
+
+  const total = mainEvent.episodeEnd - mainEvent.episodeStart + 1;
+  const current = currentEpisode - mainEvent.episodeStart + 1;
+  const progressPercentage = Math.min(100, Math.max(0, Math.round((current / total) * 100)));
+
+  // 위치 결정
+  let position: CurrentArcSummary['position'];
+  if (arcEvent) {
+    if (arcEvent.eventType === 'arc_start') position = 'start';
+    else if (arcEvent.eventType === 'arc_climax') position = 'climax';
+    else if (arcEvent.eventType === 'arc_end') position = 'end';
+    else position = 'middle';
+  } else {
+    if (progressPercentage < 30) position = 'start';
+    else if (progressPercentage < 70) position = 'middle';
+    else if (progressPercentage < 90) position = 'climax';
+    else position = 'end';
+  }
+
+  return {
+    arcName: mainEvent.eventName,
+    position,
+    progressPercentage,
+    mainDirective: mainEvent.mainConflict || mainEvent.eventName,
   };
 }
 

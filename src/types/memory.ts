@@ -23,6 +23,39 @@ export interface WorldBibleContext {
 }
 
 /**
+ * 타임라인 이벤트 (매크로 스토리 연표)
+ */
+export interface TimelineEvent {
+  id: string;
+  eventName: string;
+  eventType: 'arc_start' | 'arc_climax' | 'arc_end' | 'major_conflict' |
+             'milestone' | 'turning_point' | 'setup' | 'cooldown';
+  episodeStart: number;
+  episodeEnd: number;
+  location: string | null;
+  mainConflict: string | null;
+  objectives: string[];
+  constraints: string[];
+  foreshadowingSeeds: string[];
+  keyCharacters: string[];
+  characterFocus: string | null;
+  tone: string | null;
+  pacing: 'slow' | 'moderate' | 'fast' | 'climactic' | null;
+  importance: number;
+  status: 'planned' | 'in_progress' | 'completed' | 'modified';
+}
+
+/**
+ * 현재 아크 요약 정보
+ */
+export interface CurrentArcSummary {
+  arcName: string;
+  position: 'start' | 'middle' | 'climax' | 'end';
+  progressPercentage: number;
+  mainDirective: string;
+}
+
+/**
  * 슬라이딩 윈도우 컨텍스트
  * AI에게 전달될 모든 컨텍스트 정보를 담는 객체
  */
@@ -47,6 +80,12 @@ export interface SlidingWindowContext {
 
   // 장기 기억 검색 결과 (특정 캐릭터/사건 관련)
   longTermMemories?: LongTermMemoryResult[];
+
+  // 현재 회차에 해당하는 타임라인 이벤트들 (매크로 스토리 연표)
+  activeTimelineEvents?: TimelineEvent[];
+
+  // 현재 아크 요약 정보
+  currentArcSummary?: CurrentArcSummary;
 }
 
 /**

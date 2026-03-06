@@ -60,6 +60,27 @@ interface Stats {
   totalCharacters: number;
 }
 
+interface TimelineEvent {
+  id: string;
+  event_name: string;
+  event_type: string;
+  episode_start: number;
+  episode_end: number;
+  location: string | null;
+  main_conflict: string | null;
+  objectives: string[];
+  constraints: string[];
+  foreshadowing_seeds: string[];
+  key_characters: string[];
+  character_focus: string | null;
+  tone: string | null;
+  pacing: string | null;
+  importance: number;
+  status: string;
+  notes: string | null;
+  created_at: string;
+}
+
 const HOOK_TYPE_LABELS: Record<string, string> = {
   foreshadowing: '복선',
   mystery: '미스터리',
@@ -83,6 +104,35 @@ const ROLE_LABELS: Record<string, string> = {
   extra: '엑스트라',
 };
 
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  arc_start: '아크 시작',
+  arc_climax: '클라이맥스',
+  arc_end: '아크 종료',
+  major_conflict: '주요 충돌',
+  milestone: '마일스톤',
+  turning_point: '전환점',
+  setup: '설정 구간',
+  cooldown: '휴식 구간',
+};
+
+const EVENT_TYPE_COLORS: Record<string, string> = {
+  arc_start: 'bg-blue-600',
+  arc_climax: 'bg-red-600',
+  arc_end: 'bg-indigo-600',
+  major_conflict: 'bg-orange-600',
+  milestone: 'bg-green-600',
+  turning_point: 'bg-purple-600',
+  setup: 'bg-yellow-600',
+  cooldown: 'bg-gray-600',
+};
+
+const PACING_LABELS: Record<string, string> = {
+  slow: '느린 전개',
+  moderate: '보통 전개',
+  fast: '빠른 전개',
+  climactic: '최고조',
+};
+
 export default function TimelinePage() {
   const params = useParams();
   const projectId = params.projectId as string;
@@ -93,18 +143,28 @@ export default function TimelinePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'timeline' | 'hooks' | 'characters'>('timeline');
+  const [viewMode, setViewMode] = useState<'timeline' | 'hooks' | 'characters' | 'macro'>('timeline');
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
 
   const loadTimeline = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/projects/${projectId}/timeline`);
-      if (!res.ok) throw new Error('Failed to load timeline');
+      const [timelineRes, eventsRes] = await Promise.all([
+        fetch(`/api/projects/${projectId}/timeline`),
+        fetch(`/api/projects/${projectId}/timeline-events`),
+      ]);
 
-      const data = await res.json();
+      if (!timelineRes.ok) throw new Error('Failed to load timeline');
+
+      const data = await timelineRes.json();
       setTimeline(data.timeline);
       setStats(data.stats);
       setAllHooks(data.hooks);
+
+      if (eventsRes.ok) {
+        const eventsData = await eventsRes.json();
+        setTimelineEvents(eventsData.events || []);
+      }
     } catch {
       setError('타임라인을 불러오는데 실패했습니다.');
     } finally {
@@ -162,6 +222,16 @@ export default function TimelinePage() {
               }`}
             >
               캐릭터
+            </button>
+            <button
+              onClick={() => setViewMode('macro')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                viewMode === 'macro'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:text-white'
+              }`}
+            >
+              연표 관리
             </button>
           </div>
         </div>
@@ -229,8 +299,15 @@ export default function TimelinePage() {
           />
         ) : viewMode === 'hooks' ? (
           <HooksView hooks={allHooks} timeline={timeline} />
-        ) : (
+        ) : viewMode === 'characters' ? (
           <CharactersView timeline={timeline} />
+        ) : (
+          <MacroTimelineView
+            events={timelineEvents}
+            projectId={projectId}
+            onRefresh={loadTimeline}
+            totalEpisodes={stats?.totalEpisodes || 0}
+          />
         )}
       </div>
     </div>
@@ -548,6 +625,545 @@ function CharactersView({ timeline }: { timeline: TimelineItem[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// 연표 관리 뷰 (매크로 타임라인)
+function MacroTimelineView({
+  events,
+  projectId,
+  onRefresh,
+  totalEpisodes,
+}: {
+  events: TimelineEvent[];
+  projectId: string;
+  onRefresh: () => void;
+  totalEpisodes: number;
+}) {
+  const [showModal, setShowModal] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<TimelineEvent | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // 폼 상태
+  const [formData, setFormData] = useState({
+    event_name: '',
+    event_type: 'major_conflict',
+    episode_start: 1,
+    episode_end: 1,
+    location: '',
+    main_conflict: '',
+    objectives: [''],
+    constraints: [''],
+    foreshadowing_seeds: [''],
+    character_focus: '',
+    tone: '',
+    pacing: 'moderate',
+    importance: 5,
+    notes: '',
+  });
+
+  const resetForm = () => {
+    setFormData({
+      event_name: '',
+      event_type: 'major_conflict',
+      episode_start: 1,
+      episode_end: 1,
+      location: '',
+      main_conflict: '',
+      objectives: [''],
+      constraints: [''],
+      foreshadowing_seeds: [''],
+      character_focus: '',
+      tone: '',
+      pacing: 'moderate',
+      importance: 5,
+      notes: '',
+    });
+    setEditingEvent(null);
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setShowModal(true);
+  };
+
+  const openEditModal = (event: TimelineEvent) => {
+    setEditingEvent(event);
+    setFormData({
+      event_name: event.event_name,
+      event_type: event.event_type,
+      episode_start: event.episode_start,
+      episode_end: event.episode_end,
+      location: event.location || '',
+      main_conflict: event.main_conflict || '',
+      objectives: event.objectives.length > 0 ? event.objectives : [''],
+      constraints: event.constraints.length > 0 ? event.constraints : [''],
+      foreshadowing_seeds: event.foreshadowing_seeds.length > 0 ? event.foreshadowing_seeds : [''],
+      character_focus: event.character_focus || '',
+      tone: event.tone || '',
+      pacing: event.pacing || 'moderate',
+      importance: event.importance,
+      notes: event.notes || '',
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+
+      const payload = {
+        ...formData,
+        objectives: formData.objectives.filter(o => o.trim()),
+        constraints: formData.constraints.filter(c => c.trim()),
+        foreshadowing_seeds: formData.foreshadowing_seeds.filter(f => f.trim()),
+      };
+
+      const url = editingEvent
+        ? `/api/projects/${projectId}/timeline-events/${editingEvent.id}`
+        : `/api/projects/${projectId}/timeline-events`;
+
+      const res = await fetch(url, {
+        method: editingEvent ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to save event');
+      }
+
+      setShowModal(false);
+      resetForm();
+      onRefresh();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '저장 실패');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (eventId: string) => {
+    if (!confirm('이 이벤트를 삭제하시겠습니까?')) return;
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/timeline-events/${eventId}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok) throw new Error('Failed to delete');
+      onRefresh();
+    } catch {
+      alert('삭제 실패');
+    }
+  };
+
+  const addArrayItem = (field: 'objectives' | 'constraints' | 'foreshadowing_seeds') => {
+    setFormData(prev => ({ ...prev, [field]: [...prev[field], ''] }));
+  };
+
+  const updateArrayItem = (field: 'objectives' | 'constraints' | 'foreshadowing_seeds', index: number, value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: prev[field].map((item, i) => (i === index ? value : item)),
+    }));
+  };
+
+  const removeArrayItem = (field: 'objectives' | 'constraints' | 'foreshadowing_seeds', index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: prev[field].filter((_, i) => i !== index),
+    }));
+  };
+
+  // 이벤트를 에피소드 범위별로 정렬
+  const sortedEvents = [...events].sort((a, b) => a.episode_start - b.episode_start);
+
+  return (
+    <div>
+      {/* 헤더 */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-semibold">매크로 스토리 연표</h2>
+          <p className="text-sm text-gray-400 mt-1">
+            거시적 스토리 흐름을 계획하고 AI에게 방향을 지시합니다
+          </p>
+        </div>
+        <button
+          onClick={openCreateModal}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+        >
+          + 이벤트 추가
+        </button>
+      </div>
+
+      {events.length === 0 ? (
+        <div className="text-center py-20 bg-gray-800/50 rounded-lg">
+          <div className="text-5xl mb-4">📅</div>
+          <h3 className="text-lg font-semibold mb-2">아직 연표가 없습니다</h3>
+          <p className="text-gray-400 mb-6">
+            스토리 아크, 주요 충돌, 마일스톤 등을 등록하세요
+          </p>
+          <button
+            onClick={openCreateModal}
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+          >
+            첫 이벤트 만들기
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {sortedEvents.map(event => (
+            <div
+              key={event.id}
+              className="bg-gray-800 rounded-lg p-4 hover:bg-gray-800/80 transition"
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <span
+                      className={`px-2 py-1 rounded text-xs text-white ${EVENT_TYPE_COLORS[event.event_type] || 'bg-gray-600'}`}
+                    >
+                      {EVENT_TYPE_LABELS[event.event_type] || event.event_type}
+                    </span>
+                    <span className="text-sm text-gray-400">
+                      {event.episode_start}화 ~ {event.episode_end}화
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      중요도: {event.importance}/10
+                    </span>
+                    {event.pacing && (
+                      <span className="text-xs text-gray-500">
+                        {PACING_LABELS[event.pacing] || event.pacing}
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="font-semibold text-lg mb-1">{event.event_name}</h3>
+
+                  {event.main_conflict && (
+                    <p className="text-gray-300 text-sm mb-2">{event.main_conflict}</p>
+                  )}
+
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {event.location && (
+                      <span className="px-2 py-1 bg-gray-700 rounded text-xs text-gray-300">
+                        📍 {event.location}
+                      </span>
+                    )}
+                    {event.objectives.length > 0 && (
+                      <span className="px-2 py-1 bg-green-900/50 rounded text-xs text-green-300">
+                        ✅ 목표 {event.objectives.length}개
+                      </span>
+                    )}
+                    {event.constraints.length > 0 && (
+                      <span className="px-2 py-1 bg-red-900/50 rounded text-xs text-red-300">
+                        ❌ 제약 {event.constraints.length}개
+                      </span>
+                    )}
+                    {event.foreshadowing_seeds.length > 0 && (
+                      <span className="px-2 py-1 bg-purple-900/50 rounded text-xs text-purple-300">
+                        💡 복선 {event.foreshadowing_seeds.length}개
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 ml-4">
+                  <button
+                    onClick={() => openEditModal(event)}
+                    className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-sm transition"
+                  >
+                    수정
+                  </button>
+                  <button
+                    onClick={() => handleDelete(event.id)}
+                    className="px-3 py-1.5 bg-red-900/50 hover:bg-red-800 text-red-300 rounded text-sm transition"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 이벤트 추가/수정 모달 */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-gray-800 border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">
+                {editingEvent ? '이벤트 수정' : '새 이벤트 추가'}
+              </h2>
+              <button
+                onClick={() => setShowModal(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* 기본 정보 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    이벤트명 *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.event_name}
+                    onChange={e => setFormData(prev => ({ ...prev, event_name: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="예: 충돌지대 - 첫 번째 관문"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    이벤트 타입 *
+                  </label>
+                  <select
+                    value={formData.event_type}
+                    onChange={e => setFormData(prev => ({ ...prev, event_type: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                  >
+                    {Object.entries(EVENT_TYPE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    페이싱
+                  </label>
+                  <select
+                    value={formData.pacing}
+                    onChange={e => setFormData(prev => ({ ...prev, pacing: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                  >
+                    {Object.entries(PACING_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    시작 에피소드 *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={formData.episode_start}
+                    onChange={e => setFormData(prev => ({ ...prev, episode_start: parseInt(e.target.value) || 1 }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    종료 에피소드 *
+                  </label>
+                  <input
+                    type="number"
+                    min={formData.episode_start}
+                    value={formData.episode_end}
+                    onChange={e => setFormData(prev => ({ ...prev, episode_end: parseInt(e.target.value) || 1 }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    주요 무대/지역
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.location}
+                    onChange={e => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="예: 흑풍산맥 입구"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    중요도 (1-10)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={formData.importance}
+                    onChange={e => setFormData(prev => ({ ...prev, importance: parseInt(e.target.value) || 5 }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                  />
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-1">
+                    분위기/톤
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.tone}
+                    onChange={e => setFormData(prev => ({ ...prev, tone: e.target.value }))}
+                    className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                    placeholder="예: 긴장감 + 약간의 유머"
+                  />
+                </div>
+              </div>
+
+              {/* 핵심 갈등 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  핵심 갈등
+                </label>
+                <textarea
+                  value={formData.main_conflict}
+                  onChange={e => setFormData(prev => ({ ...prev, main_conflict: e.target.value }))}
+                  rows={3}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white resize-none"
+                  placeholder="이 구간의 핵심 갈등/목표를 설명하세요"
+                />
+              </div>
+
+              {/* 목표 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  달성해야 할 목표
+                </label>
+                {formData.objectives.map((obj, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={obj}
+                      onChange={e => updateArrayItem('objectives', i, e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                      placeholder={`목표 ${i + 1}`}
+                    />
+                    {formData.objectives.length > 1 && (
+                      <button
+                        onClick={() => removeArrayItem('objectives', i)}
+                        className="px-3 py-2 bg-gray-700 hover:bg-red-900/50 rounded-lg text-gray-400 hover:text-red-300"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => addArrayItem('objectives')}
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                >
+                  + 목표 추가
+                </button>
+              </div>
+
+              {/* 제약 조건 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  제약 조건 (하면 안 되는 것)
+                </label>
+                {formData.constraints.map((con, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={con}
+                      onChange={e => updateArrayItem('constraints', i, e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                      placeholder={`제약 ${i + 1}`}
+                    />
+                    {formData.constraints.length > 1 && (
+                      <button
+                        onClick={() => removeArrayItem('constraints', i)}
+                        className="px-3 py-2 bg-gray-700 hover:bg-red-900/50 rounded-lg text-gray-400 hover:text-red-300"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => addArrayItem('constraints')}
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                >
+                  + 제약 추가
+                </button>
+              </div>
+
+              {/* 복선 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  뿌려야 할 복선
+                </label>
+                {formData.foreshadowing_seeds.map((seed, i) => (
+                  <div key={i} className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={seed}
+                      onChange={e => updateArrayItem('foreshadowing_seeds', i, e.target.value)}
+                      className="flex-1 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white"
+                      placeholder={`복선 ${i + 1}`}
+                    />
+                    {formData.foreshadowing_seeds.length > 1 && (
+                      <button
+                        onClick={() => removeArrayItem('foreshadowing_seeds', i)}
+                        className="px-3 py-2 bg-gray-700 hover:bg-red-900/50 rounded-lg text-gray-400 hover:text-red-300"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  onClick={() => addArrayItem('foreshadowing_seeds')}
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                >
+                  + 복선 추가
+                </button>
+              </div>
+
+              {/* 메모 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">
+                  작가 메모
+                </label>
+                <textarea
+                  value={formData.notes}
+                  onChange={e => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white resize-none"
+                  placeholder="추가 메모 (AI에게 전달되지 않음)"
+                />
+              </div>
+            </div>
+
+            {/* 버튼 */}
+            <div className="sticky bottom-0 bg-gray-800 border-t border-gray-700 px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving || !formData.event_name}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition"
+              >
+                {saving ? '저장 중...' : editingEvent ? '수정' : '생성'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -438,9 +438,9 @@ export default function EpisodeEditorPage() {
     }
 
     const charCount = content.length;
-    if (charCount < 3500) {
+    if (charCount < 4000) {
       const proceed = confirm(
-        `현재 분량이 ${charCount}자로 권장 분량(4,000자)보다 적습니다.\n그래도 채택하시겠습니까?`
+        `⚠️ 분량 경고\n\n현재 분량: ${charCount.toLocaleString()}자\n권장 분량: 4,000~6,000자\n\n분량이 부족하지만 강제로 채택하시겠습니까?\n(경고: 스트리밍이 중간에 끊겼을 수 있습니다)`
       );
       if (!proceed) return;
     }
