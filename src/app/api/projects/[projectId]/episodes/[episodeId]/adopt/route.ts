@@ -36,13 +36,12 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Episode not found' }, { status: 404 });
     }
 
-    // 2. 분량 검증 (4,000~6,000자)
+    // 2. 분량 검증 → 제거됨 (Soft Warning으로 전환)
+    // 사용자의 저장 권한을 시스템이 통제하지 않음
+    // 분량 부족 경고는 프론트엔드에서만 표시
     const charCount = episode.content?.length || 0;
-    if (charCount < 3500) {
-      return NextResponse.json(
-        { error: `분량이 부족합니다. 현재 ${charCount}자, 최소 4,000자 필요` },
-        { status: 400 }
-      );
+    if (charCount < 4000) {
+      console.warn(`[Adopt] 분량 부족 경고: ${charCount}자 (권장: 4,000~6,000자) - 사용자가 강제 채택함`);
     }
 
     // 3. 에피소드 상태 업데이트 (published)

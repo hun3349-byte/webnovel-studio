@@ -440,7 +440,7 @@ export default function EpisodeEditorPage() {
     const charCount = content.length;
     if (charCount < 4000) {
       const proceed = confirm(
-        `⚠️ 분량 경고\n\n현재 분량: ${charCount.toLocaleString()}자\n권장 분량: 4,000~6,000자\n\n분량이 부족하지만 강제로 채택하시겠습니까?\n(경고: 스트리밍이 중간에 끊겼을 수 있습니다)`
+        `📝 분량 안내\n\n현재 분량: ${charCount.toLocaleString()}자\n권장 분량: 4,000~6,000자\n\n권장 분량에 미달하지만 채택하시겠습니까?\n(채택 후에도 언제든 수정 가능합니다)`
       );
       if (!proceed) return;
     }
@@ -485,10 +485,10 @@ export default function EpisodeEditorPage() {
     }
   };
 
-  // Get char count color
+  // Get char count color - 경고 수준 (에러가 아님)
   const getCharCountColor = () => {
     const count = content.length;
-    if (count < 4000) return 'text-red-400';
+    if (count < 4000) return 'text-amber-400'; // 노란색 경고 (에러 아님)
     if (count > 6000) return 'text-amber-400';
     return 'text-green-400';
   };
@@ -943,9 +943,9 @@ export default function EpisodeEditorPage() {
                   {content.length.toLocaleString()}
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  {content.length < 4000 ? `${(4000 - content.length).toLocaleString()}자 부족` :
-                   content.length > 6000 ? `${(content.length - 6000).toLocaleString()}자 초과` :
-                   '적정 범위'}
+                  {content.length < 4000 ? `권장보다 ${(4000 - content.length).toLocaleString()}자 적음` :
+                   content.length > 6000 ? `권장보다 ${(content.length - 6000).toLocaleString()}자 많음` :
+                   '✓ 권장 범위'}
                 </div>
               </div>
               <div className="bg-gray-800 rounded-lg p-3">

@@ -44,7 +44,10 @@
       "Bash(npx tsc:*)",
       "Bash(npm ls:*)",
       "Bash(npx vercel:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npx dotenv:*)",
+      "Bash(node:*)"
     ]
   }
 }
