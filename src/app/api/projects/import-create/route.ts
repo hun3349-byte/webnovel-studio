@@ -169,41 +169,50 @@ export async function POST(request: NextRequest) {
     // ============================================
     const charactersToInsert: CharacterInsert[] = [];
 
-    // 주인공 (heroArc)
+    // ★★★ 주인공 (heroArc) - Tier 1 강제 ★★★
     if (processedData.layers?.heroArc?.data) {
       const heroData = buildCharacterData(
         processedData.layers!.heroArc!.data,
         project.id,
-        'protagonist'
+        'protagonist',
+        1 // ★ Tier 1: 메인 주인공
       );
       if (heroData) {
         charactersToInsert.push(heroData);
-        result.characters.push(`주인공: ${heroData.name}`);
+        result.characters.push(`주인공(Tier 1): ${heroData.name}`);
+        console.log(`[Import] ⭐ 주인공 Tier 1 설정: ${heroData.name}`);
       }
     }
 
-    // 악역 (villainArc)
+    // ★★★ 악역 (villainArc) - Tier 1 강제 ★★★
     if (processedData.layers?.villainArc?.data) {
       const villainData = buildCharacterData(
         processedData.layers!.villainArc!.data,
         project.id,
-        'antagonist'
+        'antagonist',
+        1 // ★ Tier 1: 메인 빌런
       );
       if (villainData) {
         charactersToInsert.push(villainData);
-        result.characters.push(`악역: ${villainData.name}`);
+        result.characters.push(`악역(Tier 1): ${villainData.name}`);
+        console.log(`[Import] ⭐ 빌런 Tier 1 설정: ${villainData.name}`);
       }
     }
 
-    // 추가 캐릭터 레이어들
+    // 추가 캐릭터 레이어들 - Tier 2 (주요 조연)
     const supportingLayers = ['supporting', 'mentor', 'rival', 'heroine', 'sidekick'];
     for (const layerName of supportingLayers) {
       const layer = processedData.layers?.[layerName];
       if (layer?.data) {
-        const charData = buildCharacterData(layer.data, project.id, 'supporting');
+        const charData = buildCharacterData(
+          layer.data,
+          project.id,
+          'supporting',
+          2 // ★ Tier 2: 주요 조연
+        );
         if (charData) {
           charactersToInsert.push(charData);
-          result.characters.push(`조연: ${charData.name}`);
+          result.characters.push(`조연(Tier 2): ${charData.name}`);
         }
       }
     }
@@ -596,7 +605,8 @@ function buildWorldBibleData(
 function buildCharacterData(
   data: Record<string, unknown>,
   projectId: string,
-  role: 'protagonist' | 'antagonist' | 'supporting'
+  role: 'protagonist' | 'antagonist' | 'supporting',
+  tier?: 1 | 2 | 3 // ★ Tier 강제 설정용
 ): CharacterInsert | null {
   // ============================================
   // 캐릭터 이름 (필수)
@@ -736,10 +746,14 @@ function buildCharacterData(
   const gender = extractStringField(data, ['gender', '성별', 'sex']);
 
   // ============================================
-  // 추가 데이터: 원본 보존 + 추가 필드
+  // 추가 데이터: 원본 보존 + 추가 필드 + ★ Tier 설정
   // ============================================
   const additionalData: Record<string, unknown> = {
     importedAt: new Date().toISOString(),
+    // ★★★ Tier 강제 설정 (하극상 방지) ★★★
+    // heroArc → Tier 1, villainArc → Tier 1, supporting → Tier 2
+    tier: tier ?? (role === 'protagonist' || role === 'antagonist' ? 1 : 2),
+    tier_locked: role === 'protagonist' || role === 'antagonist', // 메인 캐릭터는 Tier 잠금
   };
 
   // 원본 데이터에서 이미 매핑되지 않은 필드들 저장

@@ -7,11 +7,54 @@ import {
 } from '@/core/memory/character-extractor';
 
 /**
+ * 이름 유사도 체크 - 부분 매칭 지원
+ * "소민" ↔ "윤소민", "진우" ↔ "김진우" 등을 동일 인물로 인식
+ */
+function isNameMatch(extractedName: string, existingName: string): boolean {
+  const a = extractedName.trim().toLowerCase();
+  const b = existingName.trim().toLowerCase();
+
+  // 1. 완전 일치
+  if (a === b) return true;
+
+  // 2. 한쪽이 다른 쪽을 포함 (윤소민 contains 소민)
+  if (a.includes(b) || b.includes(a)) return true;
+
+  // 3. 성 제외 매칭 (김진우 → 진우, 윤소민 → 소민)
+  // 한글 이름: 보통 성이 1자, 이름이 2자
+  if (a.length >= 2 && b.length >= 2) {
+    // 긴 이름의 끝 2글자와 짧은 이름 비교
+    const shortA = a.slice(-2);
+    const shortB = b.slice(-2);
+    if (shortA === shortB) return true;
+    if (a.endsWith(b) || b.endsWith(a)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * 기존 캐릭터 중 매칭되는 캐릭터 찾기
+ */
+function findMatchingCharacter(
+  extractedName: string,
+  existingCharacters: Array<{ id: string; name: string; role: string | null }>
+): { id: string; name: string; role: string | null } | null {
+  for (const char of existingCharacters) {
+    if (isNameMatch(extractedName, char.name)) {
+      return char;
+    }
+  }
+  return null;
+}
+
+/**
  * POST /api/ai/extract-characters
  *
  * 에피소드에서 새로운 캐릭터를 자동 추출하여 DB에 저장
  * - 채택(adopt) 후 백그라운드에서 호출됨
  * - 새 인물은 extra(Tier 3)로 자동 등록
+ * - ★ 기존 주인공/빌런(Tier 1)은 절대 덮어쓰지 않음 (하극상 방지)
  * - 관계 데이터도 함께 갱신
  */
 export async function POST(request: NextRequest) {
@@ -47,19 +90,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Episode not found' }, { status: 404 });
     }
 
-    // 2. 기존 캐릭터 목록 조회
+    // 2. 기존 캐릭터 목록 조회 (★ role 필드 포함 - 하극상 방지용)
     const { data: existingCharacters } = await supabase
       .from('characters')
-      .select('id, name')
+      .select('id, name, role')
       .eq('project_id', projectId);
 
     const existingNames = (existingCharacters || []).map(c => c.name);
 
-    // 3. 주인공 이름 찾기
-    const protagonist = (existingCharacters || []).find(c => {
-      // role 필드는 없을 수 있으므로 이름으로 추정
-      return true; // 첫 번째 캐릭터를 임시로 사용
-    });
+    // 3. 주인공 이름 찾기 (role로 정확히 찾기)
+    const protagonist = (existingCharacters || []).find(c => c.role === 'protagonist');
     const protagonistName = protagonist?.name || '주인공';
 
     // 4. AI 캐릭터 추출 실행
@@ -77,25 +117,49 @@ export async function POST(request: NextRequest) {
       relationships: extractionResult.relationshipUpdates.length,
     });
 
-    // 5. 새 캐릭터 DB 저장
+    // 5. 새 캐릭터 DB 저장 (★ 하극상 방지 로직 강화)
     const savedCharacters = [];
+    const skippedCharacters: string[] = [];
+
     for (const extracted of extractionResult.newCharacters) {
       // 신뢰도 0.5 이상만 저장
       if (extracted.confidence < 0.5) continue;
 
-      // 이미 존재하는지 다시 확인
+      // ★★★ 핵심: 부분 이름 매칭으로 기존 캐릭터 검색 ★★★
+      const matchingChar = findMatchingCharacter(
+        extracted.name,
+        (existingCharacters || []) as Array<{ id: string; name: string; role: string | null }>
+      );
+
+      if (matchingChar) {
+        // 기존 캐릭터 발견 - 절대 덮어쓰지 않음
+        console.log(`[ExtractCharacters] 🛡️ 하극상 방지: "${extracted.name}"은(는) 기존 캐릭터 "${matchingChar.name}" (role: ${matchingChar.role || 'unknown'})과 동일인으로 판단 - 스킵`);
+        skippedCharacters.push(`${extracted.name} → ${matchingChar.name}`);
+
+        // last_appearance_episode만 업데이트 (등급/역할은 건드리지 않음)
+        await supabase
+          .from('characters')
+          .update({ last_appearance_episode: episode.episode_number })
+          .eq('id', matchingChar.id);
+
+        continue;
+      }
+
+      // 이미 존재하는지 정확한 이름으로도 다시 확인 (이중 체크)
       const { data: existing } = await supabase
         .from('characters')
-        .select('id')
+        .select('id, role')
         .eq('project_id', projectId)
         .eq('name', extracted.name)
         .single();
 
       if (existing) {
-        console.log(`[ExtractCharacters] 이미 존재: ${extracted.name}`);
+        console.log(`[ExtractCharacters] 🛡️ 정확히 일치하는 캐릭터 존재: ${extracted.name} (role: ${existing.role}) - 스킵`);
+        skippedCharacters.push(extracted.name);
         continue;
       }
 
+      // ★ 새 캐릭터 - Tier 3 (엑스트라)로 저장
       const dbData = convertToDbFormat(
         extracted,
         projectId,
@@ -113,9 +177,11 @@ export async function POST(request: NextRequest) {
         console.error(`[ExtractCharacters] 저장 실패: ${extracted.name}`, saveError);
       } else {
         savedCharacters.push(saved);
-        console.log(`[ExtractCharacters] 새 캐릭터 저장: ${extracted.name}`);
+        console.log(`[ExtractCharacters] ✅ 새 엑스트라 캐릭터 저장: ${extracted.name} (Tier 3)`);
       }
     }
+
+    console.log(`[ExtractCharacters] 하극상 방지로 스킵된 캐릭터: ${skippedCharacters.length}명`, skippedCharacters);
 
     // 6. 관계 데이터 갱신
     const relationshipsUpdated = [];
@@ -181,6 +247,8 @@ export async function POST(request: NextRequest) {
           name: c.name,
           role: c.role,
         })),
+        skippedDueToProtection: skippedCharacters.length,
+        skippedNames: skippedCharacters,
         relationshipsUpdated: relationshipsUpdated.length,
         relationships: relationshipsUpdated,
         existingCharactersMentioned: extractionResult.existingCharacterMentions.length,

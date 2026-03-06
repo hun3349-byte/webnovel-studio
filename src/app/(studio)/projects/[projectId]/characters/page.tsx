@@ -90,6 +90,10 @@ export default function CharactersPage() {
     goals: '',
   });
 
+  // Tier 복구 관련 상태
+  const [fixingTiers, setFixingTiers] = useState(false);
+  const [fixResult, setFixResult] = useState<{ fixed: string[]; message: string } | null>(null);
+
   // Load characters
   const loadCharacters = useCallback(async () => {
     try {
@@ -250,14 +254,62 @@ export default function CharactersPage() {
             <span className="text-sm text-gray-500">{characters.length}명</span>
           </div>
 
-          <button
-            onClick={handleNewCharacter}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
-          >
-            + 새 캐릭터
-          </button>
+          <div className="flex items-center gap-3">
+            {/* Tier 복구 버튼 (주인공/빌런이 엑스트라로 강등된 경우 복구) */}
+            <button
+              onClick={async () => {
+                if (!confirm('주인공/빌런의 Tier를 복구하시겠습니까?\n(protagonist → Tier 1, antagonist → Tier 1)')) return;
+                try {
+                  setFixingTiers(true);
+                  const res = await fetch(`/api/projects/${projectId}/characters/fix-tiers`, {
+                    method: 'POST',
+                  });
+                  const data = await res.json();
+                  if (res.ok) {
+                    setFixResult({ fixed: data.fixed, message: data.message });
+                    loadCharacters();
+                    setTimeout(() => setFixResult(null), 5000);
+                  } else {
+                    alert(`복구 실패: ${data.error}`);
+                  }
+                } catch {
+                  alert('Tier 복구 중 오류가 발생했습니다.');
+                } finally {
+                  setFixingTiers(false);
+                }
+              }}
+              disabled={fixingTiers}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-600 text-white rounded-lg font-medium transition flex items-center gap-2"
+              title="주인공/빌런이 엑스트라(Tier 3)로 강등된 경우 복구합니다"
+            >
+              {fixingTiers ? '복구 중...' : '🛡️ Tier 복구'}
+            </button>
+
+            <button
+              onClick={handleNewCharacter}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition"
+            >
+              + 새 캐릭터
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Tier 복구 결과 표시 */}
+      {fixResult && (
+        <div className="max-w-6xl mx-auto px-6 py-2">
+          <div className="bg-green-900/50 border border-green-700 rounded-lg px-4 py-3">
+            <div className="text-green-300 font-medium">{fixResult.message}</div>
+            {fixResult.fixed.length > 0 && (
+              <ul className="mt-2 text-sm text-green-400">
+                {fixResult.fixed.map((item, i) => (
+                  <li key={i}>✅ {item}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="max-w-6xl mx-auto px-6 py-2">
