@@ -117,6 +117,7 @@ webnovel-studio/
 | `episode_log_queue` | ★ 로그 생성 재시도 큐 |
 | `story_hooks` | ★ 떡밥 관리 (미해결/해결) |
 | `writing_memories` | 사용자 문체 학습 데이터 |
+| `timeline_events` | ★ 매크로 스토리 연표 (아크, 충돌, 마일스톤) |
 
 ### 보완점 반영 사항
 
@@ -144,6 +145,9 @@ search_character_memories(project_id, search_query, limit)
 
 -- Fallback 로그 생성 (AI 실패 시)
 create_fallback_episode_log(episode_id, project_id, episode_number, content)
+
+-- 특정 에피소드에 활성화된 타임라인 이벤트 조회
+get_active_timeline_events(p_project_id, p_episode_number)
 ```
 
 ---
@@ -390,6 +394,40 @@ onHeartbeat: () => {
     - World Bible/Character 로드 상태 로깅
     - 경고 메시지로 누락 데이터 추적
   - ✅ **최종 점검 체크리스트** (유저 프롬프트 말미)
+
+### 2026-03-06 구현 완료
+
+- [x] **동적 캐릭터 관리 시스템**
+  - 캐릭터 자동 추출기 (`src/core/memory/character-extractor.ts`)
+    - 에피소드 채택 시 AI가 새 인물 자동 감지
+    - 이름, 외형, 소속, 행동, 관계성 추출
+    - Fallback 규칙 기반 추출 (AI 실패 시)
+  - 캐릭터 티어 시스템
+    - Tier 1: 서브 주인공 (메인 플롯 깊이 개입)
+    - Tier 2: 주요 조연 (서브플롯 담당)
+    - Tier 3: 엑스트라 (배경 인물)
+  - 티어 기반 프롬프트 주입 (`buildTierBasedCharacterEmphasis`)
+  - 캐릭터 API (`/api/ai/extract-characters`, `/api/.../upgrade`)
+  - 캐릭터 UI 업데이트 (티어 뱃지, 자동 추출 표시, 등급 업그레이드)
+
+- [x] **매크로 스토리 타임라인(연표) 시스템**
+  - DB 마이그레이션 (`00005_timeline_events.sql`)
+    - `timeline_events` 테이블 (아크, 충돌, 마일스톤 등)
+    - `get_active_timeline_events()` RPC 함수
+  - Timeline Events API
+    - `GET/POST /api/projects/[projectId]/timeline-events`
+    - `GET/PATCH/DELETE /api/projects/[projectId]/timeline-events/[eventId]`
+  - 슬라이딩 윈도우 빌더 연동
+    - `includeTimelineEvents` 옵션
+    - 타임라인 이벤트 자동 로드
+  - 프롬프트 주입기 강화 (`buildMainPlotDirective`)
+    - 현재 아크 위치 표시 (arcName, position, progressPercentage)
+    - 목표/제약/복선 지시문 생성
+    - 거시적 흐름 이탈 방지 규칙
+  - 연표 관리 UI (`/projects/[id]/timeline` → 연표 관리 탭)
+    - 이벤트 목록 시각화 (에피소드 범위별 정렬)
+    - 이벤트 CRUD 모달
+    - 타입별 색상 구분 (arc=파랑, conflict=주황, climax=빨강)
 
 ---
 
