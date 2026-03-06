@@ -450,11 +450,16 @@ export default function EpisodeEditorPage() {
       setError(null);
 
       // First save the content
-      await fetch(`/api/projects/${projectId}/episodes/${episodeId}`, {
+      const saveRes = await fetch(`/api/projects/${projectId}/episodes/${episodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content }),
       });
+
+      if (!saveRes.ok) {
+        const saveData = await saveRes.json();
+        throw new Error(saveData.error || '저장 실패');
+      }
 
       // Then adopt
       const res = await fetch(
