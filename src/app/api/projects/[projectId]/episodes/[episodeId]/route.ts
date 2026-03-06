@@ -49,8 +49,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
 // PATCH /api/projects/[projectId]/episodes/[episodeId] - 에피소드 수정
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
+  console.log('[Episode PATCH v2] Request received'); // 버전 표시로 캐시 갱신 확인
+
   try {
     const { projectId, episodeId } = await params;
+    console.log('[Episode PATCH v2] Params:', { projectId, episodeId });
+
     const supabase = await createServerSupabaseClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -67,6 +71,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (content !== undefined) {
       updateData.content = content;
       updateData.char_count = content.length;
+      console.log('[Episode PATCH v2] Saving content:', {
+        charCount: content.length,
+        note: '분량 제한 없음 - 모든 길이 허용'
+      });
     }
     if (status !== undefined) updateData.status = status;
 

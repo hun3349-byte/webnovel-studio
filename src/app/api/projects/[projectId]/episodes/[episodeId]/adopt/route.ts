@@ -15,14 +15,20 @@ interface RouteParams {
  * 3. 다음 화 집필을 위한 Memory Pipeline 시작
  */
 export async function POST(request: NextRequest, { params }: RouteParams) {
+  console.log('[Adopt API v2] Request received'); // 버전 표시로 캐시 갱신 확인
+
   try {
     const { projectId, episodeId } = await params;
+    console.log('[Adopt API v2] Params:', { projectId, episodeId });
+
     const supabase = await createServerSupabaseClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
+      console.log('[Adopt API v2] Auth error:', authError);
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
+    console.log('[Adopt API v2] User authenticated:', user.id);
 
     // 1. 에피소드 조회
     const { data: episode, error: fetchError } = await supabase
