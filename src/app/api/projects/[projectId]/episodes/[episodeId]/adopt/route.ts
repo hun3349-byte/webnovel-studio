@@ -36,13 +36,16 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Episode not found' }, { status: 404 });
     }
 
-    // 2. 분량 검증 → 제거됨 (Soft Warning으로 전환)
-    // 사용자의 저장 권한을 시스템이 통제하지 않음
-    // 분량 부족 경고는 프론트엔드에서만 표시
+    // 2. 최소 안전 검증 (완전히 빈 콘텐츠만 차단)
     const charCount = episode.content?.length || 0;
-    if (charCount < 4000) {
-      console.warn(`[Adopt] 분량 부족 경고: ${charCount}자 (권장: 4,000~6,000자) - 사용자가 강제 채택함`);
+    if (charCount === 0) {
+      return NextResponse.json(
+        { error: '에피소드 내용이 비어있습니다.' },
+        { status: 400 }
+      );
     }
+    // 분량 제한 없음 - 몇 자든 채택 허용
+    console.log(`[Adopt] 에피소드 채택: ${charCount}자`);
 
     // 3. 에피소드 상태 업데이트 (published)
     const { error: updateError } = await supabase
