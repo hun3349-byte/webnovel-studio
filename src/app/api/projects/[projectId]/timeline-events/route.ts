@@ -12,9 +12,17 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  // 최상단 환경변수 체크 로깅
+  console.log('[TimelineEvents GET] ENV Check:', {
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'MISSING',
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING',
+  });
+
   try {
     const resolvedParams = await params;
     const projectId = resolvedParams?.projectId;
+
+    console.log('[TimelineEvents GET] Params received:', { resolvedParams, projectId });
 
     // projectId 검증
     if (!projectId) {
@@ -86,14 +94,22 @@ export async function GET(
 
     return NextResponse.json({ events: data || [] });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // 최상단 에러 로깅 (Vercel Runtime Logs에서 확인 가능)
+    console.error('[TimelineEvents GET Error]:', error);
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('[TimelineEvents GET] Unexpected error:', errorMessage, errorStack);
+    console.error('[TimelineEvents GET] Details:', { message: errorMessage, stack: errorStack });
 
     return NextResponse.json(
       {
         error: '타임라인 이벤트를 불러오는 중 문제가 발생했습니다.',
         details: errorMessage,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+        debug: {
+          supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'MISSING',
+          serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING',
+        },
         events: [],
       },
       { status: 500 }

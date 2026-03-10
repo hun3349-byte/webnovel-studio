@@ -35,9 +35,17 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ projectId: string }> }
 ) {
+  // 최상단 환경변수 체크 로깅
+  console.log('[StoryBible GET] ENV Check:', {
+    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'MISSING',
+    serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING',
+  });
+
   try {
     const resolvedParams = await params;
     const projectId = resolvedParams?.projectId;
+
+    console.log('[StoryBible GET] Params received:', { resolvedParams, projectId });
 
     // projectId 검증
     if (!projectId) {
@@ -57,7 +65,12 @@ export async function GET(
       .order('episode_number', { ascending: true });
 
     if (error) {
-      console.error('[StoryBible GET] DB Error:', error);
+      console.error('[StoryBible GET] DB Error:', JSON.stringify(error, null, 2));
+      console.error('[StoryBible GET] Error Code:', error.code);
+      console.error('[StoryBible GET] Error Message:', error.message);
+      console.error('[StoryBible GET] Error Details:', error.details);
+      console.error('[StoryBible GET] Error Hint:', error.hint);
+
       // 테이블이 없는 경우 빈 배열 반환
       if (error.message?.includes('does not exist') || error.code === '42P01') {
         console.warn('[StoryBible GET] Table does not exist, returning empty array');
@@ -68,7 +81,14 @@ export async function GET(
         });
       }
       return NextResponse.json(
-        { error: error.message, details: error, synopses: [], count: 0 },
+        {
+          error: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          synopses: [],
+          count: 0,
+        },
         { status: 500 }
       );
     }
@@ -81,14 +101,22 @@ export async function GET(
       count: synopses.length,
     });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    // 최상단 에러 로깅 (Vercel Runtime Logs에서 확인 가능)
+    console.error('[StoryBible GET Error]:', error);
+
+    const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error('[StoryBible GET] Unexpected Error:', errorMessage, errorStack);
+    console.error('[StoryBible GET] Details:', { message: errorMessage, stack: errorStack });
 
     return NextResponse.json(
       {
         error: '스토리 바이블을 불러오는 중 문제가 발생했습니다.',
         details: errorMessage,
+        stack: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+        debug: {
+          supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'SET' : 'MISSING',
+          serviceKey: process.env.SUPABASE_SERVICE_ROLE_KEY ? 'SET' : 'MISSING',
+        },
         synopses: [],
         count: 0,
       },
