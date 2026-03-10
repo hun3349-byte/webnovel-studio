@@ -756,9 +756,9 @@ export default function EpisodeEditorPage() {
       )}
 
       {/* Main Content */}
-      <div className="flex-1 flex max-w-7xl mx-auto w-full">
+      <div className="flex-1 flex max-w-7xl mx-auto w-full min-h-0">
         {/* Editor Panel */}
-        <div className="flex-1 p-6 flex flex-col">
+        <div className="flex-1 p-6 flex flex-col min-h-0">
           {/* ★ 선택된 텍스트 표시 */}
           {selectedText && (
             <div className="mb-2 p-2 bg-purple-900/30 border border-purple-700 rounded text-sm">
@@ -778,8 +778,8 @@ export default function EpisodeEditorPage() {
             onKeyUp={handleTextSelection}
             disabled={!isEditable || generating}
             placeholder="에피소드 내용을 작성하세요..."
-            className="flex-1 w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none min-h-[500px]"
-            style={{ fontFamily: 'Pretendard, sans-serif', lineHeight: '1.8' }}
+            className="flex-1 w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto"
+            style={{ fontFamily: 'Pretendard, sans-serif', lineHeight: '1.8', minHeight: '300px' }}
           />
         </div>
 
