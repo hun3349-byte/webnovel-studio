@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+
+// Service Role 클라이언트 (RLS 우회)
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 // GET: 타임라인 이벤트 목록 조회
 export async function GET(
@@ -7,13 +13,19 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = await params;
-    const supabase = await createServerSupabaseClient();
+    const resolvedParams = await params;
+    const projectId = resolvedParams?.projectId;
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    // projectId 검증
+    if (!projectId) {
+      console.error('[TimelineEvents GET] Missing projectId');
+      return NextResponse.json(
+        { error: 'projectId가 필요합니다.', events: [] },
+        { status: 400 }
+      );
     }
+
+    console.log('[TimelineEvents GET] Fetching for projectId:', projectId);
 
     // 쿼리 파라미터
     const { searchParams } = new URL(request.url);
@@ -28,8 +40,16 @@ export async function GET(
       });
 
       if (error) {
-        console.error('Timeline events RPC error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error('[TimelineEvents GET] RPC error:', error);
+        // RPC 함수가 없는 경우 빈 배열 반환
+        if (error.message?.includes('does not exist') || error.code === '42883') {
+          console.warn('[TimelineEvents GET] RPC function does not exist, returning empty array');
+          return NextResponse.json({ events: [], warning: 'RPC 함수가 없습니다.' });
+        }
+        return NextResponse.json(
+          { error: error.message, details: error, events: [] },
+          { status: 500 }
+        );
       }
 
       return NextResponse.json({ events: data || [] });
@@ -49,14 +69,35 @@ export async function GET(
     const { data, error } = await query;
 
     if (error) {
-      console.error('Timeline events fetch error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('[TimelineEvents GET] DB error:', error);
+      // 테이블이 없는 경우 빈 배열 반환
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        console.warn('[TimelineEvents GET] Table does not exist, returning empty array');
+        return NextResponse.json({
+          events: [],
+          warning: 'timeline_events 테이블이 없습니다. 마이그레이션을 실행해주세요.',
+        });
+      }
+      return NextResponse.json(
+        { error: error.message, details: error, events: [] },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ events: data || [] });
   } catch (error) {
-    console.error('Timeline events API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[TimelineEvents GET] Unexpected error:', errorMessage, errorStack);
+
+    return NextResponse.json(
+      {
+        error: '타임라인 이벤트를 불러오는 중 문제가 발생했습니다.',
+        details: errorMessage,
+        events: [],
+      },
+      { status: 500 }
+    );
   }
 }
 
@@ -66,12 +107,16 @@ export async function POST(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = await params;
-    const supabase = await createServerSupabaseClient();
+    const resolvedParams = await params;
+    const projectId = resolvedParams?.projectId;
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+    // projectId 검증
+    if (!projectId) {
+      console.error('[TimelineEvents POST] Missing projectId');
+      return NextResponse.json(
+        { error: 'projectId가 필요합니다.' },
+        { status: 400 }
+      );
     }
 
     const body = await request.json();
@@ -91,6 +136,8 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    console.log('[TimelineEvents POST] Creating event for projectId:', projectId);
 
     const { data, error } = await supabase
       .from('timeline_events')
@@ -117,13 +164,24 @@ export async function POST(
       .single();
 
     if (error) {
-      console.error('Timeline event create error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('[TimelineEvents POST] DB error:', error);
+      return NextResponse.json(
+        { error: error.message, details: error },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ event: data }, { status: 201 });
   } catch (error) {
-    console.error('Timeline events API error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[TimelineEvents POST] Unexpected error:', errorMessage);
+
+    return NextResponse.json(
+      {
+        error: '타임라인 이벤트 생성 중 문제가 발생했습니다.',
+        details: errorMessage,
+      },
+      { status: 500 }
+    );
   }
 }

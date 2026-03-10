@@ -36,7 +36,19 @@ export async function GET(
   { params }: { params: Promise<{ projectId: string }> }
 ) {
   try {
-    const { projectId } = await params;
+    const resolvedParams = await params;
+    const projectId = resolvedParams?.projectId;
+
+    // projectId 검증
+    if (!projectId) {
+      console.error('[StoryBible GET] Missing projectId');
+      return NextResponse.json(
+        { error: 'projectId가 필요합니다.', synopses: [], count: 0 },
+        { status: 400 }
+      );
+    }
+
+    console.log('[StoryBible GET] Fetching for projectId:', projectId);
 
     const { data, error } = await supabase
       .from('episode_synopses')
@@ -45,21 +57,41 @@ export async function GET(
       .order('episode_number', { ascending: true });
 
     if (error) {
-      console.error('[StoryBible GET] Error:', error);
+      console.error('[StoryBible GET] DB Error:', error);
+      // 테이블이 없는 경우 빈 배열 반환
+      if (error.message?.includes('does not exist') || error.code === '42P01') {
+        console.warn('[StoryBible GET] Table does not exist, returning empty array');
+        return NextResponse.json({
+          synopses: [],
+          count: 0,
+          warning: 'episode_synopses 테이블이 없습니다. 마이그레이션을 실행해주세요.',
+        });
+      }
       return NextResponse.json(
-        { error: error.message },
+        { error: error.message, details: error, synopses: [], count: 0 },
         { status: 500 }
       );
     }
 
+    // null 또는 undefined 처리
+    const synopses = data || [];
+
     return NextResponse.json({
-      synopses: data as EpisodeSynopsis[],
-      count: data?.length || 0,
+      synopses: synopses as EpisodeSynopsis[],
+      count: synopses.length,
     });
   } catch (error) {
-    console.error('[StoryBible GET] Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error('[StoryBible GET] Unexpected Error:', errorMessage, errorStack);
+
     return NextResponse.json(
-      { error: 'Failed to fetch story bible' },
+      {
+        error: '스토리 바이블을 불러오는 중 문제가 발생했습니다.',
+        details: errorMessage,
+        synopses: [],
+        count: 0,
+      },
       { status: 500 }
     );
   }
