@@ -578,6 +578,43 @@ onHeartbeat: () => {
   - DB 저장 시 정제된 버전 사용
   - 메타데이터에 로직 체크 결과 포함
 
+- [x] **Story Bible API 버그 수정** (`/api/projects/[projectId]/story-bible`)
+  - `episode_number: 0` → `episode_number: 1` 수정 (validation 에러 방지)
+  - PUT API에 `episode_number < 1` 검증 추가
+  - GET API `projectId` 파라미터 검증 강화
+  - 테이블 미존재 시 빈 배열 반환 (500 에러 대신)
+  - 상세 에러 로깅 추가 (code, details, hint)
+  - content-type 체크 추가 (JSON 파싱 전)
+
+- [x] **Timeline Events API 버그 수정** (`/api/projects/[projectId]/timeline-events`)
+  - 인증 의존성 제거 (Service Role 클라이언트 사용)
+  - `projectId` 파라미터 검증 강화
+  - RPC 함수 미존재 시 빈 배열 반환
+  - 상세 에러 로깅 추가
+
+- [x] **DB 권한 마이그레이션** (`supabase/migrations/00007_fix_episode_synopses_permissions.sql`)
+  - `episode_synopses` 테이블 RLS 정책 수정
+    - `USING (true)` → 개별 정책 분리 (SELECT/INSERT/UPDATE/DELETE)
+    - `WITH CHECK (true)` 추가 (INSERT/UPDATE 허용)
+  - `timeline_events` 테이블 동일 적용
+  - `GRANT ALL` 권한 부여 (anon, authenticated, service_role)
+  - RPC 함수 실행 권한 부여
+
+- [x] **Vercel 스트리밍 타임아웃 해결**
+  - `partial-rewrite` API에 Edge Runtime 설정 추가
+    - `export const runtime = 'edge'`
+    - `export const maxDuration = 60`
+  - 기존 설정 확인 완료: `generate-episode`, `test-generate`
+
+- [x] **프론트엔드 Hidden CoT 실시간 필터링** (`src/app/(studio)/projects/[projectId]/episodes/[episodeId]/page.tsx`)
+  - `filterLogicCheckFromStream()` 함수 추가
+    - 완전한 `<logic_check>...</logic_check>` 블록 제거
+    - 스트리밍 중 미완료 블록 숨김 처리
+    - 부분 태그 처리 (`<logic_c`, `<logi`, etc.)
+  - 스트리밍 핸들러 수정
+    - `text` 청크 수신 시 즉시 필터링
+    - `complete` 메시지 수신 시 최종 필터링
+
 - [x] **캐릭터 상태 자동 갱신 강화** (`/api/ai/compress-log`)
   - `CharacterStatusTracker` 연동
   - 감정 상태, 부상, 위치, 소지품 포괄 업데이트
