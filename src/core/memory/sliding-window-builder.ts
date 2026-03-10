@@ -8,6 +8,7 @@ import type {
   LongTermMemoryResult,
   TimelineEvent,
   CurrentArcSummary,
+  EpisodeSynopsis,
 } from '@/types/memory';
 
 /**
@@ -30,6 +31,7 @@ export async function buildSlidingWindowContext(
     longTermSearchQueries?: string[];
     includeWritingPreferences?: boolean;
     includeTimelineEvents?: boolean;
+    includeSynopses?: boolean;
   } = {}
 ): Promise<SlidingWindowContext> {
   const {
@@ -37,6 +39,7 @@ export async function buildSlidingWindowContext(
     longTermSearchQueries = [],
     includeWritingPreferences = true,
     includeTimelineEvents = true,
+    includeSynopses = true,
   } = options;
 
   const supabase = await createServerSupabaseClient();
@@ -50,6 +53,7 @@ export async function buildSlidingWindowContext(
     writingMemoriesResult,
     timelineEventsResult,
     previousEpisodeResult,
+    synopsesResult,
   ] = await Promise.all([
     // 1. World Bible 조회
     supabase
@@ -108,6 +112,12 @@ export async function buildSlidingWindowContext(
           .eq('episode_number', targetEpisodeNumber - 1)
           .single()
       : Promise.resolve({ data: null, error: null }),
+
+    // 8. ★★★ 에피소드 시놉시스 조회 (Story Bible) ★★★
+    // 테이블이 없을 수 있으므로 에러 무시
+    includeSynopses
+      ? fetchEpisodeSynopses(supabase, projectId, targetEpisodeNumber)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   // 에러 처리
@@ -229,6 +239,32 @@ export async function buildSlidingWindowContext(
     targetEpisodeNumber
   );
 
+  // ★★★ 에피소드 시놉시스 변환 (Story Bible) ★★★
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const episodeSynopses: EpisodeSynopsis[] = (synopsesResult.data || []).map((syn: any) => ({
+    episodeNumber: syn.episode_number,
+    title: syn.title,
+    synopsis: syn.synopsis,
+    goals: syn.goals,
+    keyEvents: syn.key_events,
+    featuredCharacters: syn.featured_characters,
+    location: syn.location,
+    timeContext: syn.time_context,
+    arcName: syn.arc_name,
+    arcPosition: syn.arc_position,
+    foreshadowing: syn.foreshadowing,
+    callbacks: syn.callbacks,
+    isCurrent: syn.episode_number === targetEpisodeNumber,
+  }));
+
+  if (episodeSynopses.length > 0) {
+    console.log('[SlidingWindowBuilder] 시놉시스 로드됨:', {
+      count: episodeSynopses.length,
+      currentEpisode: targetEpisodeNumber,
+      hasCurrentSynopsis: episodeSynopses.some(s => s.isCurrent),
+    });
+  }
+
   return {
     worldBible: worldBibleResult.data,
     recentLogs,
@@ -240,6 +276,7 @@ export async function buildSlidingWindowContext(
     longTermMemories: longTermMemories.length > 0 ? longTermMemories : undefined,
     activeTimelineEvents: activeTimelineEvents.length > 0 ? activeTimelineEvents : undefined,
     currentArcSummary,
+    episodeSynopses: episodeSynopses.length > 0 ? episodeSynopses : undefined,
   };
 }
 
@@ -361,4 +398,247 @@ ${context.lastSceneAnchor}
   }
 
   return sections.join('\n\n');
+}
+
+/**
+ * 에피소드 시놉시스 조회 헬퍼 함수
+ * episode_synopses 테이블이 없을 경우 빈 배열 반환
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchEpisodeSynopses(
+  supabase: any,
+  projectId: string,
+  targetEpisodeNumber: number
+): Promise<{ data: unknown[] | null; error: unknown }> {
+  try {
+    const result = await supabase
+      .from('episode_synopses')
+      .select('*')
+      .eq('project_id', projectId)
+      .gte('episode_number', targetEpisodeNumber - 3)
+      .lte('episode_number', targetEpisodeNumber + 5)
+      .order('episode_number', { ascending: true });
+
+    return result;
+  } catch {
+    // 테이블이 없거나 에러 발생 시 빈 배열 반환
+    console.log('[SlidingWindowBuilder] episode_synopses 테이블 조회 실패 (테이블 없을 수 있음)');
+    return { data: [], error: null };
+  }
+}
+
+// ============================================================================
+// v8.4: 다이내믹 컨텍스트 최적화 (Dynamic Context Optimization)
+// LLM의 토큰 한계와 집중력 문제를 해결하기 위한 압축 컨텍스트
+// ============================================================================
+
+/**
+ * 다이내믹 컨텍스트 요약 결과
+ */
+export interface DynamicContextSummary {
+  // 1. 전체 시놉시스 3줄 요약
+  overallSynopsis: string;
+
+  // 2. 직전 1~2화 엔딩 (이어쓰기용)
+  previousEndings: Array<{
+    episodeNumber: number;
+    lastParagraphs: string;  // 마지막 500자
+  }>;
+
+  // 3. 핵심 캐릭터 상태 (최소 정보)
+  coreCharacters: Array<{
+    name: string;
+    role: string;
+    status: string;  // 한 줄 요약
+  }>;
+
+  // 4. 즉시 필요한 미해결 떡밥 (중요도 8+ 만)
+  urgentHooks: string[];
+
+  // 토큰 절감 효과 추정치
+  estimatedTokenReduction: number;
+}
+
+/**
+ * 슬라이딩 윈도우 컨텍스트를 다이내믹 컨텍스트로 압축
+ *
+ * 핵심 원칙:
+ * 1. 전체 시놉시스 3줄 요약
+ * 2. 직전 1~2화 엔딩
+ * 3. 현재 PD 지시사항 (별도 전달)
+ *
+ * @param context 전체 슬라이딩 윈도우 컨텍스트
+ * @returns 압축된 다이내믹 컨텍스트
+ */
+export function buildDynamicContext(context: SlidingWindowContext): DynamicContextSummary {
+  // 1. 전체 시놉시스 3줄 요약 생성
+  let overallSynopsis = '';
+
+  if (context.episodeSynopses && context.episodeSynopses.length > 0) {
+    // 시놉시스가 있는 경우 3줄로 압축
+    const synopses = context.episodeSynopses
+      .sort((a, b) => a.episodeNumber - b.episodeNumber)
+      .slice(0, 5);
+
+    const currentSyn = synopses.find(s => s.isCurrent);
+    const prevSyn = synopses.filter(s => s.episodeNumber < (currentSyn?.episodeNumber || 999)).slice(-2);
+
+    overallSynopsis = [
+      prevSyn.length > 0 ? `[이전] ${prevSyn.map(s => s.synopsis.substring(0, 50)).join(' → ')}` : '',
+      currentSyn ? `[현재] ${currentSyn.synopsis.substring(0, 100)}` : '',
+      currentSyn?.goals?.length ? `[목표] ${currentSyn.goals.slice(0, 2).join(', ')}` : '',
+    ].filter(Boolean).join('\n');
+  } else if (context.recentLogs && context.recentLogs.length > 0) {
+    // 시놉시스가 없으면 로그 요약 사용
+    overallSynopsis = context.recentLogs
+      .slice(-3)
+      .map(log => `[${log.episodeNumber}화] ${log.summary.substring(0, 80)}`)
+      .join('\n');
+  }
+
+  // 2. 직전 1~2화 엔딩 추출
+  const previousEndings: DynamicContextSummary['previousEndings'] = [];
+
+  if (context.previousEpisodeEnding) {
+    // 직전 회차 엔딩이 있으면 마지막 500자 사용
+    previousEndings.push({
+      episodeNumber: context.recentLogs[0]?.episodeNumber || 0,
+      lastParagraphs: context.previousEpisodeEnding.slice(-500),
+    });
+  }
+
+  // 이전 로그에서 last500Chars 추가 (최대 2개)
+  if (context.recentLogs) {
+    for (const log of context.recentLogs.slice(0, 2)) {
+      if (log.last500Chars && !previousEndings.some(e => e.episodeNumber === log.episodeNumber)) {
+        previousEndings.push({
+          episodeNumber: log.episodeNumber,
+          lastParagraphs: log.last500Chars,
+        });
+      }
+    }
+  }
+
+  // 3. 핵심 캐릭터 상태 (주인공, 빌런, 주요 조연만)
+  const coreCharacters: DynamicContextSummary['coreCharacters'] = [];
+
+  if (context.activeCharacters) {
+    const priorityRoles = ['protagonist', 'antagonist', 'supporting'];
+
+    for (const role of priorityRoles) {
+      const chars = context.activeCharacters.filter(c => c.role === role);
+      for (const char of chars.slice(0, role === 'supporting' ? 2 : 1)) {
+        const statusParts = [];
+        if (char.currentLocation) statusParts.push(`위치:${char.currentLocation}`);
+        if (char.emotionalState) statusParts.push(`감정:${char.emotionalState}`);
+        if (char.injuries?.length) statusParts.push(`부상:${char.injuries[0]}`);
+
+        coreCharacters.push({
+          name: char.name,
+          role: char.role || 'other',
+          status: statusParts.join(', ') || '정상',
+        });
+      }
+    }
+  }
+
+  // 4. 긴급 미해결 떡밥 (중요도 8+ 만)
+  const urgentHooks: string[] = [];
+
+  if (context.unresolvedHooks) {
+    for (const hook of context.unresolvedHooks) {
+      if (hook.importance >= 8) {
+        urgentHooks.push(`[${hook.createdInEpisodeNumber}화] ${hook.summary}`);
+      }
+    }
+  }
+
+  // 토큰 절감 효과 추정 (대략적)
+  const fullContextLength = JSON.stringify(context).length;
+  const compressedLength =
+    overallSynopsis.length +
+    previousEndings.reduce((sum, e) => sum + e.lastParagraphs.length, 0) +
+    coreCharacters.length * 50 +
+    urgentHooks.join('').length;
+
+  const estimatedTokenReduction = Math.round((1 - compressedLength / fullContextLength) * 100);
+
+  console.log('[DynamicContext] 컨텍스트 압축 완료:', {
+    originalChars: fullContextLength,
+    compressedChars: compressedLength,
+    reductionPercent: estimatedTokenReduction,
+    coreCharCount: coreCharacters.length,
+    urgentHookCount: urgentHooks.length,
+  });
+
+  return {
+    overallSynopsis,
+    previousEndings,
+    coreCharacters,
+    urgentHooks,
+    estimatedTokenReduction,
+  };
+}
+
+/**
+ * 다이내믹 컨텍스트를 프롬프트 문자열로 직렬화
+ */
+export function serializeDynamicContext(dynamicContext: DynamicContextSummary): string {
+  const sections: string[] = [];
+
+  // 1. 전체 시놉시스 3줄 요약
+  if (dynamicContext.overallSynopsis) {
+    sections.push(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  📋 [핵심 컨텍스트] 스토리 흐름 3줄 요약                                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+${dynamicContext.overallSynopsis}
+`);
+  }
+
+  // 2. 직전 회차 엔딩 (이어쓰기 필수)
+  if (dynamicContext.previousEndings.length > 0) {
+    const endingContent = dynamicContext.previousEndings
+      .map(e => `【${e.episodeNumber}화 마지막】\n${e.lastParagraphs}`)
+      .join('\n\n');
+
+    sections.push(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  🔗 [이어쓰기 필수] 직전 회차 엔딩 - 여기서 바로 이어서 작성하라              ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+${endingContent}
+
+🚨 위 마지막 문장 직후부터 1초의 시간 건너뜀 없이 작성 시작
+`);
+  }
+
+  // 3. 핵심 캐릭터 상태 (최소 정보)
+  if (dynamicContext.coreCharacters.length > 0) {
+    const charList = dynamicContext.coreCharacters
+      .map(c => `• ${c.name} [${c.role}]: ${c.status}`)
+      .join('\n');
+
+    sections.push(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  👥 [핵심 캐릭터 상태]                                                         ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+${charList}
+`);
+  }
+
+  // 4. 긴급 떡밥 (중요도 8+)
+  if (dynamicContext.urgentHooks.length > 0) {
+    sections.push(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  💡 [긴급 떡밥] 회수 고려 대상                                                 ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+${dynamicContext.urgentHooks.map(h => `• ${h}`).join('\n')}
+`);
+  }
+
+  return sections.join('\n');
 }

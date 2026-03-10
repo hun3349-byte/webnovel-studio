@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { CharacterStatusBoard, StoryBiblePanel, FloatingEditTooltip } from '@/components/editor';
 
 interface Episode {
   id: string;
@@ -35,9 +36,12 @@ interface Character {
   id: string;
   name: string;
   role: 'protagonist' | 'antagonist' | 'supporting' | 'extra';
-  emotional_state: string;
-  current_location: string | null;
+  emotional_state?: string | null;
+  current_location?: string | null;
   is_alive: boolean;
+  injuries?: string[] | null;
+  possessed_items?: string[] | null;
+  tier?: number;
 }
 
 interface StoryHook {
@@ -194,8 +198,8 @@ export default function EpisodeEditorPage() {
   const [unresolvedHooks, setUnresolvedHooks] = useState<StoryHook[]>([]);
   const [recentLogs, setRecentLogs] = useState<EpisodeLog[]>([]);
 
-  // Panel tabs: 'context' | 'generate' | 'quality'
-  const [activePanel, setActivePanel] = useState<'context' | 'generate' | 'quality'>('context');
+  // Panel tabs: 'context' | 'generate' | 'quality' | 'story-bible'
+  const [activePanel, setActivePanel] = useState<'context' | 'generate' | 'quality' | 'story-bible'>('context');
 
   // Quality validation state
   const [validating, setValidating] = useState(false);
@@ -204,6 +208,16 @@ export default function EpisodeEditorPage() {
     passed: boolean;
     suggestions: string[];
   } | null>(null);
+
+  // ★ 기능 1: 채택 후 수정 기능 (Unlock Editor)
+  const [isUnlocked, setIsUnlocked] = useState(false);
+
+  // ★ 기능 2: AI 부분 수정 기능 (Partial Edit)
+  const [selectedText, setSelectedText] = useState('');
+  const [selectionRange, setSelectionRange] = useState<{ start: number; end: number } | null>(null);
+  const [showPartialEditModal, setShowPartialEditModal] = useState(false);
+  const [partialEditInstruction, setPartialEditInstruction] = useState('');
+  const [partialEditing, setPartialEditing] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -490,6 +504,102 @@ export default function EpisodeEditorPage() {
     }
   };
 
+  // ★ 기능 1: 잠금 해제 핸들러
+  const handleUnlock = () => {
+    const confirmed = confirm(
+      '발행된 에피소드를 수정하시겠습니까?\n\n⚠️ 주의: 수정 후 저장하면 기존 로그가 무효화되어 재생성됩니다.'
+    );
+    if (confirmed) {
+      setIsUnlocked(true);
+    }
+  };
+
+  // ★ 기능 2: 텍스트 선택 핸들러
+  const handleTextSelection = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const selected = textarea.value.substring(start, end);
+
+    if (selected.trim().length > 0) {
+      setSelectedText(selected);
+      setSelectionRange({ start, end });
+    } else {
+      setSelectedText('');
+      setSelectionRange(null);
+    }
+  };
+
+  // ★ 기능 2: AI 부분 수정 핸들러 (모달용)
+  const handlePartialEdit = async () => {
+    if (!selectedText || !selectionRange || !partialEditInstruction.trim()) {
+      alert('수정할 텍스트와 지시사항을 입력해주세요.');
+      return;
+    }
+
+    await handlePartialRewrite(partialEditInstruction);
+    setShowPartialEditModal(false);
+    setPartialEditInstruction('');
+  };
+
+  // ★ 기능 2: AI 부분 수정 (플로팅 툴팁용)
+  const handlePartialRewrite = async (instruction: string) => {
+    if (!selectedText || !selectionRange) {
+      throw new Error('선택된 텍스트가 없습니다.');
+    }
+
+    setPartialEditing(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/ai/partial-rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originalText: selectedText,
+          instruction,
+          context: {
+            fullContent: content,
+            beforeSelection: content.substring(Math.max(0, selectionRange.start - 500), selectionRange.start),
+            afterSelection: content.substring(selectionRange.end, Math.min(content.length, selectionRange.end + 500)),
+          },
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || '부분 수정 실패');
+      }
+
+      const data = await res.json();
+      const newText = data.rewrittenText;
+
+      // 선택 영역을 새 텍스트로 교체
+      const newContent =
+        content.substring(0, selectionRange.start) +
+        newText +
+        content.substring(selectionRange.end);
+
+      setContent(newContent);
+      setSelectedText('');
+      setSelectionRange(null);
+      setSuccessMessage('선택 영역이 수정되었습니다!');
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '부분 수정 실패');
+      throw err;
+    } finally {
+      setPartialEditing(false);
+    }
+  };
+
+  // 캐릭터 업데이트 핸들러
+  const handleCharacterUpdate = (updatedCharacter: Character) => {
+    setCharacters(prev => prev.map(c => c.id === updatedCharacter.id ? updatedCharacter : c));
+  };
+
   // Get char count color - 경고 수준 (에러가 아님)
   const getCharCountColor = () => {
     const count = content.length;
@@ -543,6 +653,8 @@ export default function EpisodeEditorPage() {
   }
 
   const isPublished = episode?.status === 'published';
+  // ★ 기능 1: 발행됐더라도 잠금해제 시 편집 가능
+  const isEditable = !isPublished || isUnlocked;
 
   return (
     <div className="h-screen bg-gray-900 text-white flex flex-col overflow-hidden">
@@ -557,12 +669,25 @@ export default function EpisodeEditorPage() {
                 value={title}
                 onChange={e => setTitle(e.target.value)}
                 placeholder="제목 입력..."
-                disabled={isPublished}
+                disabled={!isEditable}
                 className="bg-transparent border-b border-gray-700 px-2 py-1 focus:outline-none focus:border-blue-500 w-48"
               />
             </div>
             {isPublished && (
-              <span className="px-2 py-1 bg-green-600 rounded text-xs">발행됨</span>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-1 rounded text-xs ${isUnlocked ? 'bg-amber-600' : 'bg-green-600'}`}>
+                  {isUnlocked ? '수정 중' : '발행됨'}
+                </span>
+                {/* ★ 기능 1: 잠금해제 버튼 */}
+                {!isUnlocked && (
+                  <button
+                    onClick={handleUnlock}
+                    className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs transition"
+                  >
+                    🔓 수정하기
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -573,12 +698,22 @@ export default function EpisodeEditorPage() {
               <span className="text-gray-500 ml-1">(4,000~6,000)</span>
             </div>
 
+            {/* ★ 기능 2: AI 부분 수정 버튼 */}
+            {selectedText && isEditable && (
+              <button
+                onClick={() => setShowPartialEditModal(true)}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white transition"
+              >
+                ✨ AI 부분 수정
+              </button>
+            )}
+
             {/* Save button */}
             <button
               onClick={handleSave}
-              disabled={saving || isPublished}
+              disabled={saving || !isEditable}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                saving || isPublished
+                saving || !isEditable
                   ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
                   : 'bg-gray-700 hover:bg-gray-600 text-white'
               }`}
@@ -586,8 +721,8 @@ export default function EpisodeEditorPage() {
               {saving ? '저장 중...' : '저장'}
             </button>
 
-            {/* Adopt button */}
-            {!isPublished && (
+            {/* Adopt button - 신규 채택 or 재발행 */}
+            {isEditable && (
               <button
                 onClick={handleAdopt}
                 disabled={adopting || !content.trim()}
@@ -597,7 +732,7 @@ export default function EpisodeEditorPage() {
                     : 'bg-green-600 hover:bg-green-700 text-white'
                 }`}
               >
-                {adopting ? '채택 중...' : '채택하기'}
+                {adopting ? '채택 중...' : isUnlocked ? '재발행' : '채택하기'}
               </button>
             )}
           </div>
@@ -624,11 +759,24 @@ export default function EpisodeEditorPage() {
       <div className="flex-1 flex max-w-7xl mx-auto w-full">
         {/* Editor Panel */}
         <div className="flex-1 p-6 flex flex-col">
+          {/* ★ 선택된 텍스트 표시 */}
+          {selectedText && (
+            <div className="mb-2 p-2 bg-purple-900/30 border border-purple-700 rounded text-sm">
+              <span className="text-purple-400">선택됨:</span>{' '}
+              <span className="text-gray-300">
+                {selectedText.length > 50 ? selectedText.substring(0, 50) + '...' : selectedText}
+              </span>
+              <span className="text-gray-500 ml-2">({selectedText.length}자)</span>
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={content}
             onChange={e => setContent(e.target.value)}
-            disabled={isPublished || generating}
+            onSelect={handleTextSelection}
+            onMouseUp={handleTextSelection}
+            onKeyUp={handleTextSelection}
+            disabled={!isEditable || generating}
             placeholder="에피소드 내용을 작성하세요..."
             className="flex-1 w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none min-h-[500px]"
             style={{ fontFamily: 'Pretendard, sans-serif', lineHeight: '1.8' }}
@@ -641,7 +789,7 @@ export default function EpisodeEditorPage() {
           <div className="flex border-b border-gray-800">
             <button
               onClick={() => setActivePanel('context')}
-              className={`flex-1 px-3 py-2.5 text-xs font-medium transition ${
+              className={`flex-1 px-2 py-2.5 text-xs font-medium transition ${
                 activePanel === 'context'
                   ? 'text-white bg-gray-800 border-b-2 border-blue-500'
                   : 'text-gray-400 hover:text-white'
@@ -650,8 +798,18 @@ export default function EpisodeEditorPage() {
               컨텍스트
             </button>
             <button
+              onClick={() => setActivePanel('story-bible')}
+              className={`flex-1 px-2 py-2.5 text-xs font-medium transition ${
+                activePanel === 'story-bible'
+                  ? 'text-white bg-gray-800 border-b-2 border-purple-500'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              시놉시스
+            </button>
+            <button
               onClick={() => setActivePanel('generate')}
-              className={`flex-1 px-3 py-2.5 text-xs font-medium transition ${
+              className={`flex-1 px-2 py-2.5 text-xs font-medium transition ${
                 activePanel === 'generate'
                   ? 'text-white bg-gray-800 border-b-2 border-blue-500'
                   : 'text-gray-400 hover:text-white'
@@ -661,7 +819,7 @@ export default function EpisodeEditorPage() {
             </button>
             <button
               onClick={() => setActivePanel('quality')}
-              className={`flex-1 px-3 py-2.5 text-xs font-medium transition ${
+              className={`flex-1 px-2 py-2.5 text-xs font-medium transition ${
                 activePanel === 'quality'
                   ? 'text-white bg-gray-800 border-b-2 border-blue-500'
                   : 'text-gray-400 hover:text-white'
@@ -716,7 +874,7 @@ export default function EpisodeEditorPage() {
                 )}
               </div>
 
-              {/* Active Characters */}
+              {/* Active Characters - 기본 목록 */}
               <div className="bg-gray-800/50 rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-green-400 mb-2 flex items-center gap-2">
                   <span>👥</span> 등장인물 ({characters.length})
@@ -744,22 +902,7 @@ export default function EpisodeEditorPage() {
                             {char.name}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 text-xs">
-                          {char.current_location && (
-                            <span className="text-gray-500">{char.current_location}</span>
-                          )}
-                          <span
-                            className={`px-1.5 py-0.5 rounded ${
-                              char.emotional_state === 'neutral'
-                                ? 'bg-gray-600 text-gray-300'
-                                : char.emotional_state?.includes('분노') || char.emotional_state?.includes('angry')
-                                ? 'bg-red-600/50 text-red-200'
-                                : 'bg-blue-600/50 text-blue-200'
-                            }`}
-                          >
-                            {char.emotional_state || 'neutral'}
-                          </span>
-                        </div>
+                        <span className="text-xs text-gray-500">{char.role}</span>
                       </div>
                     ))}
                     {characters.length > 5 && (
@@ -770,6 +913,27 @@ export default function EpisodeEditorPage() {
                   </div>
                 ) : (
                   <p className="text-gray-500 text-sm">등록된 캐릭터 없음</p>
+                )}
+              </div>
+
+              {/* ★ v8.4 캐릭터 상태창 (Status Board) - 별도 카드 */}
+              <div className="bg-gradient-to-br from-gray-800/80 to-gray-900/80 rounded-lg p-4 border border-cyan-800/30">
+                <h3 className="text-sm font-semibold text-cyan-400 mb-3 flex items-center gap-2">
+                  <span>📊</span> 캐릭터 상태창
+                </h3>
+                <CharacterStatusBoard
+                  projectId={projectId}
+                  characters={characters}
+                  onCharacterUpdate={handleCharacterUpdate}
+                  compact={false}
+                />
+                {characters.length > 0 && (
+                  <Link
+                    href={`/projects/${projectId}/characters`}
+                    className="block mt-3 text-xs text-cyan-400 hover:text-cyan-300 text-center transition"
+                  >
+                    캐릭터 상세 관리 →
+                  </Link>
                 )}
               </div>
 
@@ -833,6 +997,18 @@ export default function EpisodeEditorPage() {
                 </ul>
               </div>
             </div>
+          ) : activePanel === 'story-bible' ? (
+          /* Story Bible Panel - v8.4 시놉시스/타임라인 입력 */
+          <div className="flex-1 overflow-y-auto p-4">
+            <StoryBiblePanel
+              projectId={projectId}
+              targetEpisodeNumber={episode?.episode_number || 1}
+              onSynopsisChange={(synopsis) => {
+                // 시놉시스 변경 시 필요한 로직 추가 가능
+                console.log('[StoryBible] Synopsis updated:', synopsis.length, 'chars');
+              }}
+            />
+          </div>
           ) : activePanel === 'generate' ? (
           /* Generation Panel */
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
@@ -1061,6 +1237,76 @@ export default function EpisodeEditorPage() {
           )}
         </div>
       </div>
+
+      {/* ★ 기능 2: 플로팅 부분 수정 툴팁 (v8.4) */}
+      <FloatingEditTooltip
+        selectedText={selectedText}
+        selectionRange={selectionRange}
+        textareaRef={textareaRef}
+        onRewrite={handlePartialRewrite}
+        disabled={!isEditable || generating || partialEditing}
+      />
+
+      {/* ★ 기능 2: AI 부분 수정 모달 (대체 UI) */}
+      {showPartialEditModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-xl p-6 w-[600px] max-w-[90vw] max-h-[80vh] overflow-y-auto">
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+              ✨ AI 부분 수정
+            </h2>
+
+            {/* 선택된 텍스트 표시 */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">선택된 텍스트</label>
+              <div className="bg-gray-900 rounded-lg p-3 text-sm max-h-32 overflow-y-auto border border-gray-700">
+                {selectedText}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">{selectedText.length}자</div>
+            </div>
+
+            {/* 수정 지시사항 */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">수정 지시사항</label>
+              <textarea
+                value={partialEditInstruction}
+                onChange={e => setPartialEditInstruction(e.target.value)}
+                placeholder="예: 이 부분을 더 긴장감 있게 수정해줘 / 문장을 더 길고 밀도 있게 바꿔줘 / 전투 묘사를 더 현실적으로..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none h-24"
+              />
+            </div>
+
+            {/* 안내 메시지 */}
+            <div className="mb-4 p-3 bg-purple-900/30 border border-purple-700 rounded-lg text-sm text-gray-300">
+              <p>💡 AI가 선택된 부분만 수정합니다. 앞뒤 문맥을 파악해 자연스럽게 연결됩니다.</p>
+            </div>
+
+            {/* 버튼 */}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowPartialEditModal(false);
+                  setPartialEditInstruction('');
+                }}
+                disabled={partialEditing}
+                className="px-4 py-2 rounded-lg text-gray-400 hover:text-white transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handlePartialEdit}
+                disabled={partialEditing || !partialEditInstruction.trim()}
+                className={`px-4 py-2 rounded-lg font-medium transition ${
+                  partialEditing || !partialEditInstruction.trim()
+                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white'
+                }`}
+              >
+                {partialEditing ? 'AI 수정 중...' : 'AI로 수정하기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

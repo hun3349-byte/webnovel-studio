@@ -3,6 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { generateCompletion } from '@/lib/ai/claude-client';
 import type { LogCompressionResult } from '@/types/memory';
 import type { Json } from '@/types/database';
+import { updateCharacterStatusFromLog, type CharacterStatusTracker } from '@/core/engine/prompt-injector';
 
 /**
  * POST /api/ai/compress-log
@@ -123,12 +124,14 @@ export async function POST(request: NextRequest) {
       })
       .eq('episode_id', episodeId);
 
-    // 7. 캐릭터 상태 업데이트 (선택적)
+    // 7. 캐릭터 상태 업데이트 (v8.4 강화 - 포괄적 상태 추적)
     if (characters && compressionResult.characterStates) {
       await updateCharacterStates(
         supabase,
         characters,
-        compressionResult.characterStates
+        compressionResult.characterStates,
+        compressionResult.itemChanges,
+        episode.episode_number
       );
     }
 
@@ -297,41 +300,114 @@ function generateMockCompressionResult(
 }
 
 /**
- * 캐릭터 상태 업데이트
+ * 캐릭터 상태 업데이트 (v8.4 강화)
+ * - 감정 상태, 부상, 위치, 소지품 등 포괄적 업데이트
+ * - CharacterStatusTracker 시스템 연동
  */
 async function updateCharacterStates(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
-  characters: Array<{ id: string; name: string }>,
-  characterStates: LogCompressionResult['characterStates']
+  characters: Array<{ id: string; name: string; role: string | null; current_location: string | null; emotional_state: string | null; is_alive: boolean | null }>,
+  characterStates: LogCompressionResult['characterStates'],
+  itemChanges?: { gained?: string[]; lost?: string[] },
+  episodeNumber?: number
 ) {
-  for (const [charName, state] of Object.entries(characterStates)) {
-    const character = characters.find(
-      (c) => c.name === charName || c.name.includes(charName)
-    );
+  // 기존 캐릭터를 CharacterStatusTracker 형태로 변환
+  const existingTrackers: CharacterStatusTracker[] = characters.map(c => ({
+    characterId: c.id,
+    characterName: c.name,
+    lastUpdatedEpisode: episodeNumber || 0,
+    status: {
+      isAlive: c.is_alive ?? true,  // null인 경우 생존으로 기본 처리
+      location: c.current_location,
+      emotionalState: c.emotional_state,
+      injuries: [],
+      possessedItems: [],
+      relationships: {},
+      skills: [],
+      secretsKnown: [],
+      customFields: {},
+    },
+    changelog: [],
+  }));
+
+  // CharacterStatusTracker 유틸리티로 상태 업데이트
+  const updatedTrackers = updateCharacterStatusFromLog(
+    { characterStates, itemChanges },
+    existingTrackers,
+    episodeNumber || 0
+  );
+
+  // DB 업데이트
+  for (const tracker of updatedTrackers) {
+    const character = characters.find(c => c.name === tracker.characterName);
     if (!character) continue;
 
+    const updates: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+
     // 감정 상태 업데이트
-    if (state.emotionalArc) {
-      const emotionalState = extractEmotionalState(state.emotionalArc);
+    if (tracker.status.emotionalState) {
+      updates.emotional_state = tracker.status.emotionalState;
+    }
+
+    // 부상 업데이트
+    if (tracker.status.injuries.length > 0) {
+      updates.injuries = tracker.status.injuries;
+    }
+
+    // 위치 업데이트
+    if (tracker.status.location) {
+      updates.current_location = tracker.status.location;
+    }
+
+    // 소지품 업데이트
+    if (tracker.status.possessedItems.length > 0) {
+      updates.possessed_items = tracker.status.possessedItems;
+    }
+
+    // 생존 상태 업데이트
+    if (!tracker.status.isAlive) {
+      updates.is_alive = false;
+    }
+
+    // DB 업데이트 실행
+    if (Object.keys(updates).length > 1) { // updated_at 외에 다른 필드가 있으면
       await supabase
         .from('characters')
-        .update({
-          emotional_state: emotionalState,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updates)
         .eq('id', character.id);
+
+      console.log(`[CharacterStatus] ${character.name} 상태 업데이트:`, updates);
     }
   }
-}
 
-/**
- * 감정 상태 추출
- */
-function extractEmotionalState(emotionalArc: string): string {
-  // "평온 → 긴장 → 결의" 형태에서 마지막 상태 추출
-  const parts = emotionalArc.split(/[→>]/);
-  return parts[parts.length - 1]?.trim() || 'neutral';
+  // 변경 로그 기록 (character_memories 테이블 사용)
+  for (const tracker of updatedTrackers) {
+    if (tracker.changelog.length === 0) continue;
+
+    const character = characters.find(c => c.name === tracker.characterName);
+    if (!character) continue;
+
+    for (const change of tracker.changelog) {
+      if (change.episodeNumber !== episodeNumber) continue;
+
+      try {
+        await supabase.from('character_memories').insert({
+          character_id: character.id,
+          memory_type: 'status_change',
+          memory_summary: change.description,
+          source_episode_number: episodeNumber,
+          importance: 5,
+          emotional_tags: [change.field],
+        });
+      } catch {
+        // character_memories 테이블이 없을 수 있으므로 에러 무시
+        console.log('[CharacterStatus] character_memories 저장 실패 (테이블 없을 수 있음)');
+      }
+    }
+  }
 }
 
 /**

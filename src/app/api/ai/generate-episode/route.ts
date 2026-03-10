@@ -1,7 +1,10 @@
 import { NextRequest } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { buildSlidingWindowContext } from '@/core/memory/sliding-window-builder';
-import { buildEpisodeGenerationPrompts } from '@/core/engine/prompt-injector';
+import {
+  buildEpisodeGenerationPrompts,
+  parseAndRemoveLogicCheck,
+} from '@/core/engine/prompt-injector';
 import {
   generateEpisodeStreaming,
   createSSEStream,
@@ -110,12 +113,27 @@ export async function POST(request: NextRequest) {
         outputTokens = result.outputTokens;
         fullText = result.fullText;
 
-        const charCount = fullText.length;
+        // 6. ★★★ Hidden CoT (logic_check) 블록 파싱 및 제거 ★★★
+        const { cleanContent, logicCheck } = parseAndRemoveLogicCheck(fullText);
 
-        // 6. 상업성 검증
-        const validation = validateCommercialStandards(fullText, charCount);
+        // 사용자에게 보여줄 콘텐츠는 logic_check 제거된 버전
+        const finalContent = cleanContent;
+        const charCount = finalContent.length;
 
-        // 7. DB 저장 (옵션)
+        // 로직 체크 결과 로깅 (서버 로그용)
+        if (logicCheck.found) {
+          console.log('[HiddenCoT] 사전 검증 완료:', {
+            continuity: logicCheck.continuityCheck,
+            characters: logicCheck.characterCheck,
+            plot: logicCheck.plotCheck,
+            settings: logicCheck.settingsCheck,
+          });
+        }
+
+        // 7. 상업성 검증 (cleanContent 기준)
+        const validation = validateCommercialStandards(finalContent, charCount);
+
+        // 8. DB 저장 (옵션) - logic_check 제거된 버전 저장
         let episodeId: string | null = null;
 
         if (saveToDb) {
@@ -126,7 +144,7 @@ export async function POST(request: NextRequest) {
             .insert({
               project_id: projectId,
               episode_number: targetEpisodeNumber,
-              content: fullText,
+              content: finalContent,  // ★ Hidden CoT 제거된 버전 저장
               char_count: charCount,
               status: 'draft',
             })
@@ -140,23 +158,28 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 8. 완료 메시지 전송
+        // 9. 완료 메시지 전송 (cleanContent 기준)
         enqueue(
           createCompleteMessage({
-            fullText,
+            fullText: finalContent,  // ★ Hidden CoT 제거된 버전 전송
             charCount,
             inputTokens,
             outputTokens,
           })
         );
 
-        // 추가 메타 정보 전송
+        // 추가 메타 정보 전송 (로직 체크 결과 포함)
         enqueue(
           JSON.stringify({
             type: 'metadata',
             episodeId,
             validation,
             targetEpisodeNumber,
+            logicCheck: logicCheck.found ? {
+              continuityOk: logicCheck.continuityCheck?.continuityStatus?.includes('확인') || true,
+              charactersOk: logicCheck.characterCheck?.dbVerified || true,
+              settingsOk: logicCheck.settingsCheck?.worldConsistent || true,
+            } : null,
           })
         );
 

@@ -56,6 +56,25 @@ export interface CurrentArcSummary {
 }
 
 /**
+ * 에피소드 시놉시스 (Story Bible)
+ */
+export interface EpisodeSynopsis {
+  episodeNumber: number;
+  title: string | null;
+  synopsis: string;
+  goals: string[] | null;
+  keyEvents: string[] | null;
+  featuredCharacters: string[] | null;
+  location: string | null;
+  timeContext: string | null;
+  arcName: string | null;
+  arcPosition: string | null;
+  foreshadowing: string[] | null;
+  callbacks: string[] | null;
+  isCurrent: boolean;
+}
+
+/**
  * 슬라이딩 윈도우 컨텍스트
  * AI에게 전달될 모든 컨텍스트 정보를 담는 객체
  */
@@ -89,6 +108,9 @@ export interface SlidingWindowContext {
 
   // 현재 아크 요약 정보
   currentArcSummary?: CurrentArcSummary;
+
+  // ★ 에피소드 시놉시스 (Story Bible) - 현재 회차 기준 앞뒤 시놉시스
+  episodeSynopses?: EpisodeSynopsis[];
 }
 
 /**
