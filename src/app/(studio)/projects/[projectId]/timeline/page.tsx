@@ -713,9 +713,9 @@ function GlobalSynopsisView({
       }
 
       if (episodeSynopses.length === 0) {
-        // 단일 텍스트로 전체 저장 (1화로 저장)
+        // 파싱 실패 시 전체 텍스트를 1화 시놉시스로 저장
         episodeSynopses.push({
-          episode_number: 0, // 전체 시놉시스
+          episode_number: 1,
           synopsis: synopsis.trim(),
         });
       }
@@ -727,9 +727,16 @@ function GlobalSynopsisView({
         body: JSON.stringify({ synopses: episodeSynopses }),
       });
 
+      // 응답이 JSON인지 확인
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error(`서버 오류 (${res.status}): API가 JSON을 반환하지 않았습니다.`);
+      }
+
+      const data = await res.json();
+
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || '저장 실패');
+        throw new Error(data.error || '저장 실패');
       }
 
       setHasChanges(false);
