@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 
+// ============================================================================
+// AI 부분 수정 API (Partial Rewrite)
+// - 선택된 텍스트 구간만 AI로 재생성
+// - Edge Runtime: Vercel 서버리스 15초 타임아웃 우회
+// ============================================================================
+
+// Edge Runtime 강제 설정 (Vercel Serverless 15초 제한 우회)
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
+
+// 최대 실행 시간 설정 (Edge: 최대 30초, Vercel Pro: 60초)
+export const maxDuration = 60;
+
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });

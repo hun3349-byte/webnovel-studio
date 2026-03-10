@@ -222,6 +222,41 @@ export default function EpisodeEditorPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // ★★★ Hidden CoT (logic_check) 실시간 필터링 상태 ★★★
+  const [hiddenCoTBuffer, setHiddenCoTBuffer] = useState('');
+  const [isInsideLogicCheck, setIsInsideLogicCheck] = useState(false);
+
+  /**
+   * 스트리밍 텍스트에서 <logic_check> 블록을 실시간으로 필터링
+   * @param currentText 현재까지 누적된 전체 텍스트
+   * @returns 필터링된 텍스트 (logic_check 제외)
+   */
+  const filterLogicCheckFromStream = useCallback((currentText: string): string => {
+    // 완전한 <logic_check>...</logic_check> 블록 제거
+    let filtered = currentText.replace(/<logic_check>[\s\S]*?<\/logic_check>/g, '');
+
+    // 아직 닫히지 않은 <logic_check> 블록 처리 (스트리밍 중)
+    const openTagIndex = filtered.lastIndexOf('<logic_check>');
+    if (openTagIndex !== -1) {
+      const closeTagIndex = filtered.indexOf('</logic_check>', openTagIndex);
+      if (closeTagIndex === -1) {
+        // 아직 닫히지 않은 블록 - 해당 부분 이후 전부 제거
+        filtered = filtered.substring(0, openTagIndex);
+      }
+    }
+
+    // 부분적인 태그 시작 처리 (<, <l, <lo, <log, etc.)
+    const partialTagPatterns = ['<logic_check', '<logic_chec', '<logic_che', '<logic_ch', '<logic_c', '<logic_', '<logic', '<logi', '<log', '<lo', '<l'];
+    for (const pattern of partialTagPatterns) {
+      if (filtered.endsWith(pattern)) {
+        filtered = filtered.slice(0, -pattern.length);
+        break;
+      }
+    }
+
+    return filtered.trim();
+  }, []);
+
   // Load episode
   const loadEpisode = useCallback(async () => {
     try {
@@ -410,11 +445,18 @@ export default function EpisodeEditorPage() {
                 case 'text':
                   if (message.content) {
                     fullText += message.content;
-                    setContent(fullText);
+                    // ★★★ Hidden CoT 실시간 필터링 적용 ★★★
+                    const filteredText = filterLogicCheckFromStream(fullText);
+                    setContent(filteredText);
                     setStatus('생성 중...');
                   }
                   break;
                 case 'complete':
+                  // ★★★ 완료 시에도 최종 필터링 적용 ★★★
+                  if (message.fullText) {
+                    const finalFiltered = filterLogicCheckFromStream(message.fullText);
+                    setContent(finalFiltered);
+                  }
                   setStatus('완료!');
                   break;
                 case 'error':

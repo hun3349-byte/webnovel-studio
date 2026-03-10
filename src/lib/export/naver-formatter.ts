@@ -56,6 +56,9 @@ export function formatForNaver(
   // 기본 정제
   let formatted = content.trim();
 
+  // 기존 HTML 태그 제거 (원본 콘텐츠에 포함된 태그 정리)
+  formatted = stripExistingHtml(formatted);
+
   // 마크다운 제거 (웹소설에서는 사용하지 않음)
   formatted = removeMarkdown(formatted);
 
@@ -102,6 +105,30 @@ export function formatForNaver(
     wordCount,
     warnings,
   };
+}
+
+/**
+ * 기존 HTML 태그 제거 (원본 콘텐츠에 포함된 태그 정리)
+ */
+function stripExistingHtml(text: string): string {
+  return text
+    // br 태그를 줄바꿈으로 변환
+    .replace(/<br\s*\/?>/gi, '\n')
+    // p 태그 닫힘을 문단 구분으로 변환
+    .replace(/<\/p>/gi, '\n\n')
+    // 모든 HTML 태그 제거 (span, div 등)
+    .replace(/<[^>]+>/g, '')
+    // HTML 엔티티 복원
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    // 연속 공백 정리
+    .replace(/[ \t]+/g, ' ')
+    // 연속 줄바꿈 정리
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 /**
@@ -186,8 +213,19 @@ function convertToHtml(
  * 플레인 텍스트로 변환
  */
 function convertToPlainText(text: string): string {
-  // 이미 플레인 텍스트이므로 정리만
   return text
+    // HTML 태그 제거 (대사 강조 span 등)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    // HTML 엔티티 복원
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    // 줄 정리
     .split('\n')
     .map(line => line.trim())
     .join('\n')
