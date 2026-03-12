@@ -25,6 +25,45 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ============================================================================
+   웹소설 에디터 가독성 최적화 CSS (v8.6)
+   - 모바일/웹 환경 가독성 향상
+   - line-height, letter-spacing, word-break 조정
+   ============================================================================ */
+
+/* 메인 에디터 텍스트 영역 */
+.webnovel-editor,
+textarea.webnovel-editor,
+[data-webnovel-editor="true"] {
+  line-height: 1.8 !important;
+  letter-spacing: -0.03em !important;
+  word-break: keep-all !important;
+  font-family: 'Pretendard', 'Noto Sans KR', sans-serif !important;
+}
+
+/* 에디터 textarea 기본 스타일 */
+textarea {
+  line-height: 1.8;
+  letter-spacing: -0.03em;
+}
+
+/* 웹소설 콘텐츠 렌더링 (프리뷰/내보내기) */
+.webnovel-content {
+  line-height: 1.9;
+  letter-spacing: -0.03em;
+  word-break: keep-all;
+}
+
+.webnovel-content p {
+  margin-bottom: 1.5rem;
+}
+
+/* 대사(큰따옴표) 강조 - 독립적 시각 처리 */
+.webnovel-content .dialogue {
+  display: block;
+  margin: 1rem 0;
+}
+
 /* Animation utilities */
 @keyframes fadeIn {
   from {

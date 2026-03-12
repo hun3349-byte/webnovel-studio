@@ -64,7 +64,9 @@ export async function generateEpisodeStreaming(
   const {
     model = DEFAULT_MODEL,
     maxTokens = MAX_TOKENS,
-    temperature = 0.8,
+    // ★★★ v8.6: 창의성 및 자연스러움 향상을 위해 temperature 0.82로 상향 ★★★
+    // 범위 0.75~0.85 권장 (문장의 다양성과 자연스러운 흐름)
+    temperature = 0.82,
     systemPrompt,
     userPrompt,
     onHeartbeat,

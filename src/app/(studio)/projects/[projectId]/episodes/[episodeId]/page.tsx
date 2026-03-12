@@ -610,12 +610,37 @@ export default function EpisodeEditorPage() {
         }),
       });
 
+      // 응답이 실패했을 때 안전하게 에러 처리
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || '부분 수정 실패');
+        // 504 Gateway Timeout 또는 HTML 에러 페이지 처리
+        if (res.status === 504) {
+          throw new Error('AI 응답 지연 (타임아웃) - 잠시 후 다시 시도해주세요.');
+        }
+
+        // JSON 파싱 시도 전 content-type 확인
+        const contentType = res.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          try {
+            const data = await res.json();
+            throw new Error(data.error || '부분 수정 실패');
+          } catch (parseError) {
+            // JSON 파싱 실패 시
+            throw new Error(`서버 오류 (${res.status}) - 잠시 후 다시 시도해주세요.`);
+          }
+        } else {
+          // HTML 또는 기타 응답 (Vercel 에러 페이지 등)
+          throw new Error(`서버 오류 (${res.status}) - 잠시 후 다시 시도해주세요.`);
+        }
       }
 
-      const data = await res.json();
+      // 성공 응답도 안전하게 파싱
+      let data;
+      try {
+        data = await res.json();
+      } catch (parseError) {
+        throw new Error('AI 응답 파싱 실패 - 잠시 후 다시 시도해주세요.');
+      }
+
       const newText = data.rewrittenText;
 
       // 선택 영역을 새 텍스트로 교체
@@ -820,8 +845,15 @@ export default function EpisodeEditorPage() {
             onKeyUp={handleTextSelection}
             disabled={!isEditable || generating}
             placeholder="에피소드 내용을 작성하세요..."
-            className="flex-1 w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto"
-            style={{ fontFamily: 'Pretendard, sans-serif', lineHeight: '1.8', minHeight: '300px' }}
+            className="flex-1 w-full bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto webnovel-editor"
+            style={{
+              fontFamily: 'Pretendard, "Noto Sans KR", sans-serif',
+              lineHeight: '1.8',
+              letterSpacing: '-0.03em',
+              wordBreak: 'keep-all',
+              minHeight: '300px',
+            }}
+            data-webnovel-editor="true"
           />
         </div>
 
