@@ -187,6 +187,35 @@ export async function POST(request: NextRequest) {
           console.log('[HARDCODE-TEST] ★★★ 1화 하드코딩 시놉시스 주입됨 ★★★');
         }
 
+        // ★★★ [디버깅] Claude에 보내는 실제 프롬프트를 DB에 저장 ★★★
+        // 반드시 generateEpisodeStreaming() 호출 직전에 삽입 - 테스트 후 삭제 필수
+        try {
+          const supabaseDebug = await createServerSupabaseClient();
+          await supabaseDebug.from('episodes').upsert({
+            project_id: projectId,
+            episode_number: 9999,
+            title: 'DEBUG-PROMPT-DUMP',
+            content: JSON.stringify({
+              timestamp: new Date().toISOString(),
+              systemPrompt_first_500: systemPrompt.substring(0, 500),
+              systemPrompt_length: systemPrompt.length,
+              userPrompt_first_2000: finalUserPrompt.substring(0, 2000),
+              userPrompt_last_500: finalUserPrompt.substring(finalUserPrompt.length - 500),
+              userPrompt_length: finalUserPrompt.length,
+              has_hyungjang: finalUserPrompt.includes('형장'),
+              has_jowiChong: finalUserPrompt.includes('조위총'),
+              has_synopsis: finalUserPrompt.includes('시놉시스'),
+              has_block_chars: finalUserPrompt.includes('████'),
+              has_CRITICAL_OVERRIDE: finalUserPrompt.includes('CRITICAL OVERRIDE'),
+              targetEpisodeNumber: targetEpisodeNumber,
+            }, null, 2),
+            status: 'draft',
+          }, { onConflict: 'project_id,episode_number' });
+          console.log('★★★ PROMPT DUMP SAVED TO episodes table (ep 9999) ★★★');
+        } catch (dumpErr) {
+          console.error('DUMP FAILED:', dumpErr);
+        }
+
         // 5. Claude API 스트리밍 호출
         // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★
         const result = await generateEpisodeStreaming({
