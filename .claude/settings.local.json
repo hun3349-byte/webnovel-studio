@@ -48,7 +48,13 @@
       "Bash(npx tsx:*)",
       "Bash(npx dotenv:*)",
       "Bash(node:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(조위총)",
+      "Bash(고려)",
+      "Bash(척준경)",
+      "Bash(검마)",
+      "Bash(CRITICAL_OVERRIDE)",
+      "Bash(9999\" → 0건 ✅\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }
