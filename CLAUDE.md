@@ -778,6 +778,26 @@ onHeartbeat: () => {
     - 시놉시스 placeholder: 씬 단위 구체적 작성 예시 추가
     - V9.0 연출 대본 필드 placeholder: 갈등/감정/행동 명시 예시 추가
 
+- [x] **🔧 V9.0.3 핫픽스** — "시놉시스 무시" 문제 해결
+  - **buildSynopsisSection() 리팩토링** (`src/core/engine/prompt-injector.ts`)
+    - `isCurrent` fallback 로직 추가: isCurrent가 없으면 episodeNumber로 직접 매칭
+    - 시놉시스 강제 UI 강화: "시놉시스가 왕이다" 원칙 명시
+    - 더 강력한 시각적 강조 (╔═══ 박스 + 🚨 이모지)
+    - 핵심 시놉시스와 씬 대본 별도 강조
+  - **buildUserPromptV9() 강화**
+    - 시놉시스 섹션을 프롬프트 최상단(position 0)에 배치
+    - 최종 리마인더에 첫 씬 정보 표시
+    - isCurrent fallback 적용
+  - **[SYNOPSIS-DEBUG] / [PROMPT-DEBUG] 로그 추가**
+    - 시놉시스 로드 상태 상세 출력
+    - episodeNumber 매칭 결과 로깅
+    - 프롬프트 내 시놉시스 태그 포함 여부 검증
+    - <episode_synopsis> 태그 존재 여부 최종 확인
+  - **generate-episode API 강화** (`src/app/api/ai/generate-episode/route.ts`)
+    - includeSynopses 명시적 활성화
+    - 컨텍스트 시놉시스 상태 상세 로깅
+    - 프롬프트 내 시놉시스 검증 로그
+
 ---
 
 ## 상업적 집필 규칙 (V9.0.1 - 설명집 문제 해결)
