@@ -256,14 +256,27 @@ export async function buildSlidingWindowContext(
     foreshadowing: syn.foreshadowing,
     callbacks: syn.callbacks,
     isCurrent: syn.episode_number === targetEpisodeNumber,
+    // V9.0 신규 필드
+    emotionCurve: syn.emotion_curve,
+    endingImage: syn.ending_image,
+    forbidden: syn.forbidden,
+    sceneBeats: syn.scene_beats,
   }));
 
-  if (episodeSynopses.length > 0) {
-    console.log('[SlidingWindowBuilder] 시놉시스 로드됨:', {
-      count: episodeSynopses.length,
-      currentEpisode: targetEpisodeNumber,
-      hasCurrentSynopsis: episodeSynopses.some(s => s.isCurrent),
-    });
+  // ★★★ 디버깅: 시놉시스 로드 결과 상세 로깅 ★★★
+  console.log('[DEBUG] 시놉시스 로드 결과:', {
+    count: episodeSynopses.length,
+    targetEpisode: targetEpisodeNumber,
+    episodes: episodeSynopses.map(s => s.episodeNumber),
+    hasCurrent: episodeSynopses.some(s => s.isCurrent),
+    currentSynopsisLength: episodeSynopses.find(s => s.isCurrent)?.synopsis?.length || 0,
+    currentSynopsisPreview: episodeSynopses.find(s => s.isCurrent)?.synopsis?.substring(0, 100) || 'NONE',
+  });
+
+  if (episodeSynopses.length === 0) {
+    console.error('[CRITICAL] ★★★ 시놉시스가 DB에서 로드되지 않음! Story Bible 확인 필요 ★★★');
+  } else if (!episodeSynopses.some(s => s.isCurrent)) {
+    console.error('[CRITICAL] ★★★ 현재 회차 시놉시스(isCurrent=true)가 없음! ★★★');
   }
 
   return {

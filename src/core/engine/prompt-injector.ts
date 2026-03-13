@@ -25,6 +25,12 @@ const ABSOLUTE_RULES = `
 <absolute_rules>
 너는 상업 웹소설 작가다. 독자가 다음 화를 클릭하게 만드는 것이 유일한 목표다.
 
+★★★ 0. [시놉시스 절대 준수] ★★★
+   유저 프롬프트 최상단의 <episode_synopsis>에 적힌 씬 구성을 100% 따라야 한다.
+   시놉시스에 "형장에서 처형"이라고 되어 있으면 형장에서 시작해야 한다.
+   시놉시스에 없는 장면을 임의로 만들어내지 마라.
+   시놉시스의 씬 순서, 장소, 사건을 임의로 변경하지 마라.
+
 1. [설정 엄수] DB에 없는 인물/문파/세력을 창조하지 마라. (점소이, 상인 등 단순 엑스트라만 허용)
 2. [전투 묘사] 판타지 무공(검기, 장풍, 내공 발사) 금지. 전투는 해부학과 물리학(관절, 체중 이동, 지렛대) 기반으로 묘사.
 3. [금지어] 마크다운, 현대 외래어 사용 금지. 특히 소설 본문 내에 '주인공', '히로인', '엑스트라', '시놉시스', '복선', '떡밥', '빌런', '조연' 같은 메타 단어 절대 사용 금지. (반드시 이름이나 대명사 '소년', '노인', '그', '여인' 등으로 지칭)
@@ -171,21 +177,36 @@ export function buildCompactWorldSection(worldBible: SlidingWindowContext['world
 }
 
 // ============================================================================
-// 시놉시스 섹션 빌더 (최상단 배치용)
+// 시놉시스 섹션 빌더 (최상단 배치용) - V9.0.2 강제성 강화
 // ============================================================================
 export function buildSynopsisSection(context: SlidingWindowContext): string {
   const currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
 
+  // 디버깅 로그
+  console.log('[DEBUG] buildSynopsisSection 호출:', {
+    hasSynopses: !!context.episodeSynopses,
+    synopsesCount: context.episodeSynopses?.length || 0,
+    currentFound: !!currentSynopsis,
+    currentEpisode: currentSynopsis?.episodeNumber,
+  });
+
   if (!currentSynopsis) {
+    console.error('[CRITICAL] ★★★ 현재 회차 시놉시스를 찾을 수 없음! ★★★');
     return `
 <episode_synopsis>
-[시놉시스 없음] PD 지시사항을 따라 자유롭게 작성하되, 절대 규칙은 반드시 준수할 것.
+[⚠️ 시놉시스 없음] PD 지시사항을 따라 자유롭게 작성하되, 절대 규칙은 반드시 준수할 것.
 </episode_synopsis>
 `;
   }
 
   const parts: string[] = [];
 
+  // ★★★ V9.0.2: 강제 래핑 ★★★
+  parts.push(`████████████████████████████████████████████████████████████`);
+  parts.push(`██  [절대 명령] 아래 시놉시스 대본을 그대로 따라 써라  ██`);
+  parts.push(`██  시놉시스에 없는 장면을 만들어내면 실패다           ██`);
+  parts.push(`████████████████████████████████████████████████████████████`);
+  parts.push(``);
   parts.push(`<episode_synopsis>`);
   parts.push(`[${currentSynopsis.episodeNumber}화 핵심 시놉시스 - 반드시 이 내용대로 작성할 것]`);
 
@@ -193,14 +214,14 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
     parts.push(`제목: ${currentSynopsis.title}`);
   }
 
-  parts.push(`시놉시스: ${currentSynopsis.synopsis}`);
+  parts.push(`★ 시놉시스: ${currentSynopsis.synopsis}`);
 
   if (currentSynopsis.goals && currentSynopsis.goals.length > 0) {
-    parts.push(`목표: ${currentSynopsis.goals.join(' / ')}`);
+    parts.push(`★ 목표: ${currentSynopsis.goals.join(' / ')}`);
   }
 
   if (currentSynopsis.keyEvents && currentSynopsis.keyEvents.length > 0) {
-    parts.push(`핵심 사건: ${currentSynopsis.keyEvents.join(' → ')}`);
+    parts.push(`★ 핵심 사건 순서: ${currentSynopsis.keyEvents.join(' → ')}`);
   }
 
   // V9.0 신규 필드
@@ -209,15 +230,15 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
   }
 
   if (currentSynopsis.endingImage) {
-    parts.push(`마지막 장면 이미지: ${currentSynopsis.endingImage}`);
+    parts.push(`★ 마지막 장면 이미지: ${currentSynopsis.endingImage}`);
   }
 
   if (currentSynopsis.forbidden) {
-    parts.push(`이번 화 금지사항: ${currentSynopsis.forbidden}`);
+    parts.push(`⛔ 이번 화 금지사항: ${currentSynopsis.forbidden}`);
   }
 
   if (currentSynopsis.sceneBeats) {
-    parts.push(`씬 대본: ${currentSynopsis.sceneBeats}`);
+    parts.push(`★ 씬 대본: ${currentSynopsis.sceneBeats}`);
   }
 
   if (currentSynopsis.foreshadowing && currentSynopsis.foreshadowing.length > 0) {
@@ -229,6 +250,10 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
   }
 
   parts.push(`</episode_synopsis>`);
+  parts.push(``);
+  parts.push(`████████████████████████████████████████████████████████████`);
+  parts.push(`██  위 시놉시스의 씬 순서와 장소를 반드시 따를 것       ██`);
+  parts.push(`████████████████████████████████████████████████████████████`);
 
   return parts.join('\n');
 }
@@ -349,6 +374,20 @@ ${userInstruction}
 - 마지막: 반드시 절단신공으로 끝낼 것
 </output_format>
 `);
+
+  // 9. ★★★ V9.0.2: 시놉시스 최종 리마인더 ★★★
+  const currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
+  if (currentSynopsis) {
+    const firstScene = currentSynopsis.sceneBeats?.split('\n')[0] ||
+                       currentSynopsis.synopsis?.substring(0, 50) || '';
+    sections.push(`
+████████████████████████████████████████████████████████████
+[최종 확인] ${targetEpisodeNumber}화를 작성한다.
+위 시놉시스의 첫 번째 씬부터 시작하라: "${firstScene}..."
+시놉시스에 적힌 장소와 사건 순서를 절대 변경하지 마라.
+████████████████████████████████████████████████████████████
+`);
+  }
 
   return sections.filter(Boolean).join('\n');
 }

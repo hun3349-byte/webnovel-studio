@@ -84,6 +84,29 @@ export async function POST(request: NextRequest) {
           targetEpisodeNumber
         );
 
+        // ★★★ 디버깅: 시놉시스 주입 확인 ★★★
+        console.log('[DEBUG] ===== PROMPT LENGTH =====');
+        console.log(`System prompt: ${systemPrompt.length}자`);
+        console.log(`User prompt: ${userPrompt.length}자`);
+
+        // 시놉시스 포함 여부 확인
+        const hasSynopsis = userPrompt.includes('시놉시스') ||
+                           userPrompt.includes('synopsis') ||
+                           userPrompt.includes('episode_synopsis') ||
+                           userPrompt.includes('핵심 사건') ||
+                           userPrompt.includes('씬1') ||
+                           userPrompt.includes('[씬');
+        console.log(`[DEBUG] 시놉시스 키워드 포함 여부: ${hasSynopsis}`);
+
+        if (!hasSynopsis) {
+          console.error('[CRITICAL] ★★★ 시놉시스가 프롬프트에 포함되지 않음! ★★★');
+        }
+
+        // 유저 프롬프트 처음 800자 출력 (시놉시스가 최상단에 있는지 확인)
+        console.log('[DEBUG] User prompt 처음 800자:');
+        console.log(userPrompt.substring(0, 800));
+        console.log('[DEBUG] ===== END PROMPT DEBUG =====');
+
         // 5. Claude API 스트리밍 호출
         // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★
         const result = await generateEpisodeStreaming({
