@@ -227,30 +227,33 @@ export default function EpisodeEditorPage() {
   const [isInsideLogicCheck, setIsInsideLogicCheck] = useState(false);
 
   /**
-   * 스트리밍 텍스트에서 <logic_check> 블록을 실시간으로 필터링
+   * V9.0: 스트리밍 텍스트에서 [Scene Plan]을 필터링하고 [Prose] 이후 텍스트만 반환
    * @param currentText 현재까지 누적된 전체 텍스트
-   * @returns 필터링된 텍스트 (logic_check 제외)
+   * @returns 필터링된 텍스트 ([Prose] 이후만)
    */
   const filterLogicCheckFromStream = useCallback((currentText: string): string => {
-    // 완전한 <logic_check>...</logic_check> 블록 제거
+    // V9.0: [Prose] 태그 이후 텍스트만 반환
+    const proseIndex = currentText.indexOf('[Prose]');
+
+    if (proseIndex !== -1) {
+      // [Prose] 이후 텍스트만 반환
+      return currentText.substring(proseIndex + 7).trimStart(); // '[Prose]' 길이 = 7
+    }
+
+    // [Scene Plan]이 있고 [Prose]가 아직 없으면 "장면 설계 중..." 표시
+    if (currentText.includes('[Scene Plan]')) {
+      return ''; // 아직 본문 미시작 - 빈 문자열 반환 (UI에서 로딩 표시)
+    }
+
+    // 레거시 호환: <logic_check> 블록 제거
     let filtered = currentText.replace(/<logic_check>[\s\S]*?<\/logic_check>/g, '');
 
-    // 아직 닫히지 않은 <logic_check> 블록 처리 (스트리밍 중)
+    // 아직 닫히지 않은 <logic_check> 블록 처리
     const openTagIndex = filtered.lastIndexOf('<logic_check>');
     if (openTagIndex !== -1) {
       const closeTagIndex = filtered.indexOf('</logic_check>', openTagIndex);
       if (closeTagIndex === -1) {
-        // 아직 닫히지 않은 블록 - 해당 부분 이후 전부 제거
         filtered = filtered.substring(0, openTagIndex);
-      }
-    }
-
-    // 부분적인 태그 시작 처리 (<, <l, <lo, <log, etc.)
-    const partialTagPatterns = ['<logic_check', '<logic_chec', '<logic_che', '<logic_ch', '<logic_c', '<logic_', '<logic', '<logi', '<log', '<lo', '<l'];
-    for (const pattern of partialTagPatterns) {
-      if (filtered.endsWith(pattern)) {
-        filtered = filtered.slice(0, -pattern.length);
-        break;
       }
     }
 

@@ -3,7 +3,7 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { generateCompletion } from '@/lib/ai/claude-client';
 import type { LogCompressionResult } from '@/types/memory';
 import type { Json } from '@/types/database';
-import { updateCharacterStatusFromLog, type CharacterStatusTracker } from '@/core/engine/prompt-injector';
+// V9.0: CharacterStatusTracker 유틸리티 제거, 직접 DB 업데이트 방식으로 변경
 
 /**
  * POST /api/ai/compress-log
@@ -300,9 +300,7 @@ function generateMockCompressionResult(
 }
 
 /**
- * 캐릭터 상태 업데이트 (v8.4 강화)
- * - 감정 상태, 부상, 위치, 소지품 등 포괄적 업데이트
- * - CharacterStatusTracker 시스템 연동
+ * V9.0: 캐릭터 상태 업데이트 (직접 DB 업데이트 방식)
  */
 async function updateCharacterStates(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -312,100 +310,83 @@ async function updateCharacterStates(
   itemChanges?: { gained?: string[]; lost?: string[] },
   episodeNumber?: number
 ) {
-  // 기존 캐릭터를 CharacterStatusTracker 형태로 변환
-  const existingTrackers: CharacterStatusTracker[] = characters.map(c => ({
-    characterId: c.id,
-    characterName: c.name,
-    lastUpdatedEpisode: episodeNumber || 0,
-    status: {
-      isAlive: c.is_alive ?? true,  // null인 경우 생존으로 기본 처리
-      location: c.current_location,
-      emotionalState: c.emotional_state,
-      injuries: [],
-      possessedItems: [],
-      relationships: {},
-      skills: [],
-      secretsKnown: [],
-      customFields: {},
-    },
-    changelog: [],
-  }));
-
-  // CharacterStatusTracker 유틸리티로 상태 업데이트
-  const updatedTrackers = updateCharacterStatusFromLog(
-    { characterStates, itemChanges },
-    existingTrackers,
-    episodeNumber || 0
-  );
-
-  // DB 업데이트
-  for (const tracker of updatedTrackers) {
-    const character = characters.find(c => c.name === tracker.characterName);
+  // 캐릭터별 상태 업데이트
+  for (const [charName, charState] of Object.entries(characterStates || {})) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = charState as any;
+    const character = characters.find(c => c.name === charName);
     if (!character) continue;
 
     const updates: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
 
-    // 감정 상태 업데이트
-    if (tracker.status.emotionalState) {
-      updates.emotional_state = tracker.status.emotionalState;
+    // 감정 상태 업데이트 (emotionalArc에서 마지막 감정 추출)
+    if (state.emotionalArc) {
+      const emotions = state.emotionalArc.split('→').map((e: string) => e.trim());
+      if (emotions.length > 0) {
+        updates.emotional_state = emotions[emotions.length - 1];
+      }
     }
 
-    // 부상 업데이트
-    if (tracker.status.injuries.length > 0) {
-      updates.injuries = tracker.status.injuries;
-    }
+    // 변화 목록에서 부상/위치 추출
+    if (state.changes && Array.isArray(state.changes)) {
+      const injuries: string[] = [];
+      for (const change of state.changes) {
+        const changeStr = String(change).toLowerCase();
 
-    // 위치 업데이트
-    if (tracker.status.location) {
-      updates.current_location = tracker.status.location;
-    }
+        if (changeStr.includes('부상') || changeStr.includes('상처') || changeStr.includes('다침')) {
+          injuries.push(change);
+        }
 
-    // 소지품 업데이트
-    if (tracker.status.possessedItems.length > 0) {
-      updates.possessed_items = tracker.status.possessedItems;
-    }
+        if (changeStr.includes('이동') || changeStr.includes('도착') || changeStr.includes('떠남')) {
+          const locationMatch = String(change).match(/(?:이동|도착|떠남)[^\s]*\s*(.+)/);
+          if (locationMatch) {
+            updates.current_location = locationMatch[1].trim();
+          }
+        }
+      }
 
-    // 생존 상태 업데이트
-    if (!tracker.status.isAlive) {
-      updates.is_alive = false;
+      if (injuries.length > 0) {
+        updates.injuries = injuries;
+      }
     }
 
     // DB 업데이트 실행
-    if (Object.keys(updates).length > 1) { // updated_at 외에 다른 필드가 있으면
+    if (Object.keys(updates).length > 1) {
       await supabase
         .from('characters')
         .update(updates)
         .eq('id', character.id);
 
-      console.log(`[CharacterStatus] ${character.name} 상태 업데이트:`, updates);
-    }
-  }
+      console.log(`[CharacterStatus V9.0] ${character.name} 상태 업데이트:`, updates);
 
-  // 변경 로그 기록 (character_memories 테이블 사용)
-  for (const tracker of updatedTrackers) {
-    if (tracker.changelog.length === 0) continue;
-
-    const character = characters.find(c => c.name === tracker.characterName);
-    if (!character) continue;
-
-    for (const change of tracker.changelog) {
-      if (change.episodeNumber !== episodeNumber) continue;
-
+      // 변경 로그 기록
       try {
         await supabase.from('character_memories').insert({
           character_id: character.id,
           memory_type: 'status_change',
-          memory_summary: change.description,
+          memory_summary: `${episodeNumber}화: 상태 변화`,
           source_episode_number: episodeNumber,
           importance: 5,
-          emotional_tags: [change.field],
         });
       } catch {
-        // character_memories 테이블이 없을 수 있으므로 에러 무시
-        console.log('[CharacterStatus] character_memories 저장 실패 (테이블 없을 수 있음)');
+        console.log('[CharacterStatus] character_memories 저장 실패');
       }
+    }
+  }
+
+  // 아이템 변화 처리
+  if (itemChanges?.gained && itemChanges.gained.length > 0) {
+    const protagonist = characters.find(c => c.role === 'protagonist');
+    if (protagonist) {
+      await supabase
+        .from('characters')
+        .update({
+          possessed_items: itemChanges.gained,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', protagonist.id);
     }
   }
 }

@@ -197,13 +197,14 @@ export async function buildSlidingWindowContext(
   // 직전 회차의 마지막 500자 추출 (기존 로그 기반)
   const lastSceneAnchor = recentLogs.length > 0 ? recentLogs[0].last500Chars : '';
 
-  // ★★★ 직전 회차 본문에서 마지막 1500자 추출 (이어쓰기 강제용) ★★★
+  // ★★★ 직전 회차 본문에서 마지막 800자 추출 (이어쓰기 강제용) ★★★
+  // V9.0: 컨텍스트 최적화 - 800자로 축소하여 시놉시스/파이프라인 집중
   let previousEpisodeEnding = '';
   if (previousEpisodeResult.data?.content) {
     const fullContent = previousEpisodeResult.data.content;
-    // 마지막 1500자 추출 (충분한 컨텍스트 제공)
-    previousEpisodeEnding = fullContent.slice(-1500);
-    console.log('[SlidingWindowBuilder] 직전 회차 본문 로드됨:', {
+    // 마지막 800자 추출 (V9.0 기준)
+    previousEpisodeEnding = fullContent.slice(-800);
+    console.log('[SlidingWindowBuilder V9.0] 직전 회차 본문 로드됨:', {
       episodeNumber: previousEpisodeResult.data.episode_number,
       totalLength: fullContent.length,
       extractedLength: previousEpisodeEnding.length,

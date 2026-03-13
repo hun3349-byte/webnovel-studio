@@ -113,22 +113,17 @@ export async function POST(request: NextRequest) {
         outputTokens = result.outputTokens;
         fullText = result.fullText;
 
-        // 6. ★★★ Hidden CoT (logic_check) 블록 파싱 및 제거 ★★★
-        const { cleanContent, logicCheck } = parseAndRemoveLogicCheck(fullText);
+        // 6. ★★★ V9.0: [Scene Plan]/[Prose] 파싱 ★★★
+        const { cleanContent } = parseAndRemoveLogicCheck(fullText);
 
-        // 사용자에게 보여줄 콘텐츠는 logic_check 제거된 버전
+        // 사용자에게 보여줄 콘텐츠는 [Prose] 이후 부분
         const finalContent = cleanContent;
         const charCount = finalContent.length;
 
-        // 로직 체크 결과 로깅 (서버 로그용)
-        if (logicCheck.found) {
-          console.log('[HiddenCoT] 사전 검증 완료:', {
-            continuity: logicCheck.continuityCheck,
-            characters: logicCheck.characterCheck,
-            plot: logicCheck.plotCheck,
-            settings: logicCheck.settingsCheck,
-          });
-        }
+        console.log('[V9.0] Prose 파싱 완료:', {
+          originalLength: fullText.length,
+          proseLength: finalContent.length,
+        });
 
         // 7. 상업성 검증 (cleanContent 기준)
         const validation = validateCommercialStandards(finalContent, charCount);
@@ -168,18 +163,13 @@ export async function POST(request: NextRequest) {
           })
         );
 
-        // 추가 메타 정보 전송 (로직 체크 결과 포함)
+        // 추가 메타 정보 전송 (V9.0)
         enqueue(
           JSON.stringify({
             type: 'metadata',
             episodeId,
             validation,
             targetEpisodeNumber,
-            logicCheck: logicCheck.found ? {
-              continuityOk: logicCheck.continuityCheck?.continuityStatus?.includes('확인') || true,
-              charactersOk: logicCheck.characterCheck?.dbVerified || true,
-              settingsOk: logicCheck.settingsCheck?.worldConsistent || true,
-            } : null,
           })
         );
 

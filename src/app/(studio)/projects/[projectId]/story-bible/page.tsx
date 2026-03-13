@@ -22,6 +22,11 @@ interface EpisodeSynopsis {
   is_written: boolean;
   created_at: string;
   updated_at: string;
+  // V9.0 신규 필드
+  emotion_curve: string | null;
+  ending_image: string | null;
+  forbidden: string | null;
+  scene_beats: string | null;
 }
 
 interface EditingState {
@@ -38,6 +43,11 @@ interface EditingState {
   foreshadowing: string;
   callbacks: string;
   notes: string;
+  // V9.0 신규 필드
+  emotion_curve: string;
+  ending_image: string;
+  forbidden: string;
+  scene_beats: string;
 }
 
 const ARC_POSITIONS = [
@@ -75,6 +85,11 @@ export default function StoryBiblePage() {
     foreshadowing: '',
     callbacks: '',
     notes: '',
+    // V9.0 신규 필드
+    emotion_curve: '',
+    ending_image: '',
+    forbidden: '',
+    scene_beats: '',
   });
 
   // 필터/뷰
@@ -121,6 +136,11 @@ export default function StoryBiblePage() {
       foreshadowing: '',
       callbacks: '',
       notes: '',
+      // V9.0 신규 필드
+      emotion_curve: '',
+      ending_image: '',
+      forbidden: '',
+      scene_beats: '',
     });
     setShowModal(true);
   };
@@ -142,6 +162,11 @@ export default function StoryBiblePage() {
       foreshadowing: synopsis.foreshadowing?.join('\n') || '',
       callbacks: synopsis.callbacks?.join('\n') || '',
       notes: synopsis.notes || '',
+      // V9.0 신규 필드
+      emotion_curve: synopsis.emotion_curve || '',
+      ending_image: synopsis.ending_image || '',
+      forbidden: synopsis.forbidden || '',
+      scene_beats: synopsis.scene_beats || '',
     });
     setShowModal(true);
   };
@@ -177,6 +202,11 @@ export default function StoryBiblePage() {
           ? editing.callbacks.split('\n').filter(c => c.trim())
           : null,
         notes: editing.notes || null,
+        // V9.0 신규 필드
+        emotion_curve: editing.emotion_curve || null,
+        ending_image: editing.ending_image || null,
+        forbidden: editing.forbidden || null,
+        scene_beats: editing.scene_beats || null,
       };
 
       let res;
@@ -459,12 +489,17 @@ export default function StoryBiblePage() {
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-1">시놉시스 *</label>
+              <label className="block text-sm text-gray-400 mb-1">시놉시스 * <span className="text-yellow-500 text-xs">(씬 단위로 구체적으로!)</span></label>
               <textarea
                 value={editing.synopsis}
                 onChange={e => setEditing(prev => ({ ...prev, synopsis: e.target.value }))}
-                placeholder="이 에피소드의 주요 사건과 전개를 작성하세요..."
-                rows={4}
+                placeholder={`씬 단위로 구체적으로 작성하세요. 예:
+[씬1] 감옥 — 눈을 뜸. 목이 베인 공포의 잔상. 손이 떨림. 이 손이 자기 손이 아님을 깨닫고 비명을 삼킴.
+[씬2] 기억 충돌 — 두통과 구역질. '나는 누구인가'라는 공포.
+[씬3] 장로 심문 — 능구렁이식 대응. 장로의 표정이 미묘하게 변함.
+
+※ 추상적 요약('감옥에서 깨어나 심문받음')은 금지. 감정과 행동을 구체적으로.`}
+                rows={6}
                 className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none"
               />
             </div>
@@ -570,6 +605,58 @@ export default function StoryBiblePage() {
                   onChange={e => setEditing(prev => ({ ...prev, callbacks: e.target.value }))}
                   placeholder="이전 복선 중 회수할 것..."
                   rows={3}
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                />
+              </div>
+            </div>
+
+            {/* V9.0 신규 필드 */}
+            <div className="mb-4 p-4 bg-purple-900/20 border border-purple-700 rounded-lg">
+              <h4 className="text-sm font-semibold text-purple-400 mb-3">V9.0 연출 대본 <span className="text-gray-500 font-normal">(구체적일수록 AI 출력 품질 ↑)</span></h4>
+
+              <div className="grid grid-cols-2 gap-4 mb-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">감정 곡선</label>
+                  <input
+                    type="text"
+                    value={editing.emotion_curve}
+                    onChange={e => setEditing(prev => ({ ...prev, emotion_curve: e.target.value }))}
+                    placeholder="공포→혼란→분노(삼키며)→냉정한 관찰→위기감"
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">마지막 장면 이미지 <span className="text-yellow-500">★</span></label>
+                  <input
+                    type="text"
+                    value={editing.ending_image}
+                    onChange={e => setEditing(prev => ({ ...prev, ending_image: e.target.value }))}
+                    placeholder="장로의 손가락이 고문 도구를 만지며 미소, 쇠사슬이 '찰깍' 풀린다"
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <label className="block text-sm text-gray-400 mb-1">이번 화 금지사항</label>
+                <input
+                  type="text"
+                  value={editing.forbidden}
+                  onChange={e => setEditing(prev => ({ ...prev, forbidden: e.target.value }))}
+                  placeholder="정체 노출 금지, '제3의 길' 같은 거대 선언 금지, 직접적 과거 설명 금지"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">씬 대본 (선택) <span className="text-gray-500">— 갈등/감정/행동 명시</span></label>
+                <textarea
+                  value={editing.scene_beats}
+                  onChange={e => setEditing(prev => ({ ...prev, scene_beats: e.target.value }))}
+                  placeholder={`씬1: 공포→혼란 / 손으로 얼굴을 만지며 낯선 몸 확인
+씬2: 혼란→분노 / 기억이 충돌하며 두통, 벽을 주먹으로 침
+씬3: 경계→도발 / 장로에게 능청스럽게 대응하다가 약점 포착`}
+                  rows={4}
                   className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
                 />
               </div>

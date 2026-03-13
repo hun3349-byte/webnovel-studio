@@ -10,6 +10,7 @@
 - Memory Chaining: 에피소드 로그 자동 압축 및 슬라이딩 윈도우 컨텍스트
 - 자가진화 시스템: 사용자 피드백 학습으로 필력 우상향
 - 상업적 집필 엔진: 4,000~6,000자 분량, 절단신공 의무화, Show Don't Tell
+- **V9.0 아키텍처**: 3-Layer XML 프롬프트 (<2,000 토큰), Scene Plan → Prose 파이프라인
 
 ---
 
@@ -154,24 +155,30 @@ get_active_timeline_events(p_project_id, p_episode_number)
 
 ## 핵심 파이프라인
 
-### 에피소드 생성 플로우
+### 에피소드 생성 플로우 (V9.0)
 
 ```
 1. 슬라이딩 윈도우 컨텍스트 빌드
-   └─ World Bible + 직전 3~5개 로그 + 마지막 500자 + 캐릭터 상태 + 미해결 떡밥 + 문체 선호도
+   └─ World Bible + 직전 3~5개 로그 + 마지막 800자 + 캐릭터 상태 + 미해결 떡밥 + 문체 선호도
 
-2. 프롬프트 동적 주입
-   └─ 페르소나 + 컨텍스트 + 사용자 지시사항 조립
+2. V9.0 3-Layer XML 프롬프트 조립
+   └─ <absolute_rules> + <style_dna> + <continuity_rule>
+   └─ <synopsis_directive> userPrompt 최상단 배치
 
-3. AI 에피소드 생성 (Claude API)
+3. AI 에피소드 생성 (Claude API SSE 스트리밍)
+   └─ [Scene Plan] → [Prose] 2단계 파이프라인
 
-4. 상업성 검증
+4. 프론트엔드 실시간 파싱
+   └─ [Scene Plan] 블록 숨김, [Prose] 이후 본문만 표시
+
+5. 상업성 검증
    └─ 분량 체크 (4,000~6,000자) + 절단신공 점수 + Show/Tell 비율
 
-5. 에피소드 저장 → 자동 로그 큐 등록 (DB 트리거)
+6. 에피소드 저장 → 자동 로그 큐 등록 (DB 트리거)
+   └─ [Prose] 이후 본문만 DB 저장
 
-6. 로그 압축 (별도 AI 호출)
-   └─ 성공 시: episode_logs 저장
+7. 로그 압축 (별도 AI 호출)
+   └─ 성공 시: episode_logs 저장 + 캐릭터 상태 자동 갱신
    └─ 실패 시: 재시도 큐 등록 or Fallback 로그 생성
 ```
 
@@ -182,10 +189,35 @@ interface SlidingWindowContext {
   worldBible: WorldBible;              // 세계관 절대 규칙
   recentLogs: EpisodeLogSummary[];     // 직전 N개 회차 요약
   lastSceneAnchor: string;             // 직전 회차 마지막 500자
+  previousEpisodeEnding?: string;      // ★ V9.0: 직전 회차 본문 마지막 800자 (이어쓰기용)
   activeCharacters: CharacterCurrentState[];  // 캐릭터 현재 상태
   unresolvedHooks: UnresolvedHook[];   // 미해결 떡밥
   writingPreferences: WritingPreference[];    // 학습된 문체
   longTermMemories?: LongTermMemoryResult[];  // 장기 기억 검색 결과
+  activeTimelineEvents?: TimelineEvent[];     // 현재 회차 타임라인 이벤트
+  currentArcSummary?: CurrentArcSummary;      // 현재 아크 요약
+  episodeSynopses?: EpisodeSynopsis[];        // ★ 에피소드 시놉시스 (Story Bible)
+}
+
+// V9.0 EpisodeSynopsis 확장 필드
+interface EpisodeSynopsis {
+  episodeNumber: number;
+  title: string | null;
+  synopsis: string;
+  goals: string[] | null;
+  keyEvents: string[] | null;
+  featuredCharacters: string[] | null;
+  location: string | null;
+  timeContext: string | null;
+  arcName: string | null;
+  foreshadowing: string[] | null;
+  callbacks: string[] | null;
+  isCurrent: boolean;
+  // V9.0 연출 대본 필드
+  emotionCurve?: string | null;   // "긴장→공포→분노→각성"
+  endingImage?: string | null;    // "손끝의 나뭇잎이 갈라진다"
+  forbidden?: string | null;      // "정체 노출 금지"
+  sceneBeats?: string | null;     // PD가 직접 짜는 씬별 대본
 }
 ```
 
@@ -676,9 +708,173 @@ onHeartbeat: () => {
   - 최종 점검 체크리스트 확장 (【가독성/포매팅】 카테고리 추가)
   - 시스템 프롬프트 조립 순서 업데이트
 
+### 2026-03-13 구현 완료
+
+- [x] **🚀 프롬프트 주입기 V9.0 메이저 업데이트** (`src/core/engine/prompt-injector.ts`)
+  - 🏗️ **아키텍처 전면 개편: "규칙 엔진(Rule Engine) → 작가실(Writer's Room)"**
+    - 기존 20,000+ 토큰 "헌법" 구조 → 3-Layer XML 구조 (<2,000 토큰)
+    - 토큰 효율성 10배 개선
+  - 📜 **3-Layer XML 구조**
+    - `<absolute_rules>`: 설정 엄수, 메타 키워드 금지, 분량 규칙, 절단신공
+    - `<style_dna>`: Show Don't Tell, 판타지 무공 금지, 가독성 포매팅
+    - `<continuity_rule>`: 이어쓰기 규칙, 직전 800자 앵커
+  - 🎬 **2단계 집필 파이프라인 (Scene Plan → Prose)**
+    - `[Scene Plan]`: 씬별 장소/목표/마이크로 갈등 설계
+    - `[Prose]`: 4,000~6,000자 소설 본문 집필
+    - 파싱 함수: `parseProseFromOutput()`, `parseAndRemoveLogicCheck()`
+  - 📍 **시놉시스 최우선 배치**
+    - `<synopsis_directive>`를 userPrompt 최상단에 배치
+    - 메타 키워드 (주인공/히로인/엑스트라/시놉시스) 본문 노출 금지
+  - 📊 **컨텍스트 압축**
+    - 직전 회차 본문: 1500자 → 800자로 축소
+    - 캐릭터 정보: 필수 필드만 선별 주입 (name, role, location, emotion)
+
+- [x] **슬라이딩 윈도우 빌더 V9.0 최적화** (`src/core/memory/sliding-window-builder.ts`)
+  - 직전 회차 컨텍스트: 1500자 → 800자로 축소
+  - AI가 시놉시스에 집중할 수 있도록 이전 회차 영향력 감소
+
+- [x] **프론트엔드 [Prose] 파싱** (`src/app/(studio)/projects/[projectId]/episodes/[episodeId]/page.tsx`)
+  - `filterLogicCheckFromStream()` 함수 업데이트
+    - `[Scene Plan]` 블록 숨김 처리
+    - `[Prose]` 태그 이후 본문만 사용자에게 표시
+    - 스트리밍 중 실시간 필터링
+
+- [x] **EpisodeSynopsis V9.0 필드 확장** (`src/types/memory.ts`)
+  - `emotionCurve`: 감정 곡선 (예: "긴장→공포→분노→각성")
+  - `endingImage`: 마지막 장면 이미지 (예: "손끝의 나뭇잎이 갈라진다")
+  - `forbidden`: 금지사항 (예: "정체 노출 금지")
+  - `sceneBeats`: PD가 직접 짜는 씬별 대본 (선택사항)
+
+- [x] **Story Bible UI V9.0 연출 대본 필드** (`src/app/(studio)/projects/[projectId]/story-bible/page.tsx`)
+  - 보라색 하이라이트 "V9.0 연출 대본" 섹션 추가
+  - 감정 곡선, 엔딩 이미지, 금지사항, 씬 비트 입력 필드
+
+- [x] **generate-episode API V9.0** (`src/app/api/ai/generate-episode/route.ts`)
+  - `[Scene Plan]/[Prose]` 파싱 적용
+  - DB 저장 시 [Prose] 이후 본문만 저장
+  - 메타데이터에 파싱 결과 포함
+
+- [x] **compress-log API V9.0** (`src/app/api/ai/compress-log/route.ts`)
+  - CharacterStatusTracker 유틸리티 제거
+  - 직접 DB 업데이트 방식으로 변경 (감정 상태, 부상, 위치 등)
+
+- [x] **🔧 V9.0.1 보완 패치** (`src/core/engine/prompt-injector.ts`) — "설명집" 문제 해결
+  - **ABSOLUTE_RULES 보강**
+    - 규칙 5: 설명 금지 — "~였다/~었다" 3문장 연속 금지, 감상/판정 서술 금지
+    - 규칙 6: 주인공은 행동한다 — 매 화 최소 2번 능동적 선택/행동 장면 필수
+  - **STYLE_DNA 보강**
+    - Tell 금지 나쁜 예/좋은 예 쌍 4개 추가
+    - 감정 표현 강제 — 신체 반응, 감각 혼란, 즉각적 행동 필수
+  - **Scene Plan 강화**
+    - 각 씬에 갈등/감정/주인공 행동/독자 감정 필수 명시
+    - "생각만 하는" 씬 1개 이하 제한
+  - **Prose 비율 강제**
+    - 장면 묘사 50% 이상, 대사 25%, 심리 15% 이하, 설명 10% 이하
+    - "~였다/~었다" 설명문 30% 이하 강제
+  - **previousEpisodeEnding Fallback**
+    - null일 경우 recentLogs.last500Chars 또는 summary 사용
+    - 연속성 문제 조기 감지 로깅
+  - **Story Bible UI 개선**
+    - 시놉시스 placeholder: 씬 단위 구체적 작성 예시 추가
+    - V9.0 연출 대본 필드 placeholder: 갈등/감정/행동 명시 예시 추가
+
 ---
 
-## 상업적 집필 규칙 (v8.6 - Show Don't Tell 극강화)
+## 상업적 집필 규칙 (V9.0.1 - 설명집 문제 해결)
+
+### V9.0 프롬프트 아키텍처 개요
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                V9.0.1 3-Layer XML 구조 (보강)                    │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Layer 1: <absolute_rules> (절대 규칙) — 6개 규칙               │
+│  ├── 1. 설정 엄수: DB에 없는 인물/문파/세력 창조 금지           │
+│  ├── 2. 전투 묘사: 판타지 무공(검기, 장풍, 내공) 금지           │
+│  ├── 3. 금지어: 마크다운, 현대 외래어, 메타 키워드 금지         │
+│  ├── 4. 분량/엔딩: 4,000~6,000자, 절단신공 필수                 │
+│  ├── 5. 설명 금지: "~였다/~었다" 3문장 연속 금지 ★ V9.0.1 추가  │
+│  └── 6. 주인공 행동: 매 화 최소 2번 능동적 선택 ★ V9.0.1 추가   │
+│                                                                 │
+│  Layer 2: <style_dna> (문체 DNA) — 예시 기반                    │
+│  ├── Tell 금지 나쁜 예/좋은 예 4쌍 제공                         │
+│  ├── 감정 표현 강제: 신체 반응, 감각 혼란, 즉각적 행동          │
+│  └── 가독성: 2~3문장 문단, 대사 독립                            │
+│                                                                 │
+│  Layer 3: <continuity_rule> (연속성 규칙)                       │
+│  ├── 직전 회차 마지막 800자 앵커 (+ fallback 로직)              │
+│  └── 시간/장소/감정선 1초 오차 없이 이어받기                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### V9.0.1 집필 파이프라인 (Scene Plan 강화)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              2단계 집필 파이프라인 (V9.0.1 강화)                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  [Step 1] Scene Plan (씬 설계) — 갈등/감정/행동 필수            │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 씬 N:                                                   │    │
+│  │ - 장소/시간: (어디서, 언제)                             │    │
+│  │ - 핵심 갈등: (주인공이 무엇과 부딪히는가 — "없음" 불가) │    │
+│  │ - 감정: (시작 감정 → 끝 감정)                           │    │
+│  │ - 주인공의 행동/선택: ("관찰한다"는 행동이 아님)        │    │
+│  │ - 독자의 감정: (이 씬에서 독자는 무엇을 느끼는가)       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                           ↓                                     │
+│  [Step 2] Prose (본문 집필) — 비율 강제                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ 장면 묘사(감각+행동): 50% 이상 (2,000자 이상)           │    │
+│  │ 대사+대사 전후 행동: 25% (1,000자)                      │    │
+│  │ 내면 독백/심리: 15% 이하 (600자 이하)                   │    │
+│  │ 직접 설명/배경 해설: 10% 이하 (400자 이하)              │    │
+│  │                                                         │    │
+│  │ ★ "~였다/~었다" 설명문 30% 초과 시 실패                 │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### V9.0.1 Tell 금지 예시 (STYLE_DNA에 포함)
+
+```
+[Tell 금지 — 나쁜 예 vs 좋은 예]
+
+× "거짓말이었다. 그는 그것을 직감적으로 알았다."
+○ 장로의 미소가 눈가에 닿지 않았다. 손가락 끝이 탁자를 두드리는 박자가 미묘하게 불규칙했다.
+
+× "흥미로운 일이었다."
+○ 입꼬리가 올라갔다. 이건 뭐지. 손을 쥐었다 폈다. 남의 손처럼 낯설면서도 묘하게 익숙했다.
+
+× "그의 직감이 경고했다."
+○ 뒷목이 서늘했다. 장로의 온화한 미소 뒤에서 무언가가 꿈틀거렸다.
+
+× "전생에서 수많은 정치적 음모를 경험한 그였다."
+○ (쓰지 마라. 과거 경력을 직접 설명하지 마라. 행동으로 드러내라.)
+```
+
+### V9.0 시놉시스 강제 지시 (userPrompt 최상단)
+
+```xml
+<synopsis_directive priority="HIGHEST">
+【이번 화 시놉시스 - 반드시 이 흐름대로 전개하라】
+
+목표: {synopsis.goals}
+핵심 사건: {synopsis.keyEvents}
+감정 곡선: {synopsis.emotionCurve}
+엔딩 이미지: {synopsis.endingImage}
+금지사항: {synopsis.forbidden}
+
+⚠️ 경고:
+- 시놉시스에 명시된 사건을 건너뛰거나 다른 전개로 대체 금지
+- 시놉시스에 없는 사건을 임의로 추가 금지
+- 이전 회차 내용과 충돌 시에도 시놉시스 우선
+</synopsis_directive>
+```
 
 ### 환각 차단 헌법 (ANTI-HALLUCINATION LAW)
 

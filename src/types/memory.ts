@@ -57,6 +57,7 @@ export interface CurrentArcSummary {
 
 /**
  * 에피소드 시놉시스 (Story Bible)
+ * V9.0: 감정 곡선, 마지막 장면 이미지, 금지사항, 씬 대본 필드 추가
  */
 export interface EpisodeSynopsis {
   episodeNumber: number;
@@ -72,6 +73,12 @@ export interface EpisodeSynopsis {
   foreshadowing: string[] | null;
   callbacks: string[] | null;
   isCurrent: boolean;
+
+  // V9.0 신규 필드
+  emotionCurve?: string | null;   // "긴장→공포→분노→각성"
+  endingImage?: string | null;    // "손끝의 나뭇잎이 갈라진다"
+  forbidden?: string | null;      // "정체 노출 금지"
+  sceneBeats?: string | null;     // PD가 직접 짜주는 씬별 대본 (선택사항)
 }
 
 /**
