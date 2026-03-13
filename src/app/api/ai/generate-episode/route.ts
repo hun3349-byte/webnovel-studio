@@ -135,6 +135,15 @@ export async function POST(request: NextRequest) {
         console.log(userPrompt.substring(0, 500));
         console.log('[PROMPT-DEBUG] ===== END PROMPT DEBUG =====');
 
+        // ★★★ [증명 2] Claude API 호출 직전 — 실제 전달되는 프롬프트 확인 ★★★
+        console.log('=== ACTUAL PROMPT BEING SENT TO CLAUDE ===');
+        console.log('systemPrompt first 300:', systemPrompt?.substring(0, 300));
+        console.log('userPrompt first 500:', userPrompt?.substring(0, 500));
+        console.log('has episode_synopsis tag:', userPrompt?.includes('<episode_synopsis'));
+        console.log('has 시놉시스 keyword:', userPrompt?.includes('시놉시스'));
+        console.log('userPrompt total length:', userPrompt?.length);
+        console.log('=== END PROMPT CHECK ===');
+
         // 5. Claude API 스트리밍 호출
         // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★
         const result = await generateEpisodeStreaming({
