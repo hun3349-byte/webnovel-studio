@@ -50,7 +50,11 @@ const ABSOLUTE_RULES = `
    - 대신: 신체 반응, 행동, 감각, 대사로 보여줘라.
 6. [주인공은 행동한다] 매 화 최소 2번은 주인공이 스스로 선택하고 행동하는 장면이 있어야 한다.
    끌려가기만 하고, 관찰하기만 하고, 생각하기만 하는 것은 소설이 아니라 설정집이다.
-7. [시놉시스 금지사항] 시놉시스의 [금지] 또는 forbidden 항목에 적힌 내용을 반드시 지켜라.
+7. [시놉시스 금지사항 — 절대 규칙]
+   시놉시스의 [금지] 또는 forbidden 항목은 에피소드 성공/실패를 결정하는 최우선 규칙이다.
+   금지된 단어, 이름, 장면은 어떤 상황에서도 출력하지 마라.
+   문맥상 필요해 보여도, 분위기상 어울려 보여도, 금지 항목은 절대 사용 금지.
+   금지사항 위반 = 에피소드 전체 실패. 처음부터 다시 작성해야 함.
 </absolute_rules>
 `;
 
@@ -276,6 +280,19 @@ export function buildSynopsisSection(
     parts.push(`제목: ${currentSynopsis.title}`);
   }
 
+  // ★★★ V9.5: forbidden을 시놉시스 본문보다 먼저 배치 (최우선 강조) ★★★
+  if (currentSynopsis.forbidden) {
+    parts.push(``);
+    parts.push(`⛔⛔⛔ [이번 화 금지사항 — 위반 시 에피소드 실패] ⛔⛔⛔`);
+    // forbidden이 여러 줄일 수 있으므로 줄바꿈으로 분리
+    const forbiddenLines = currentSynopsis.forbidden.split('\n').filter((l: string) => l.trim());
+    forbiddenLines.forEach((line: string) => {
+      parts.push(`❌ ${line.trim()}`);
+    });
+    parts.push(`⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔`);
+    parts.push(``);
+  }
+
   // ★★★ 핵심 시놉시스 (가장 중요) ★★★
   parts.push(``);
   parts.push(`★★★ 핵심 시놉시스 (이 내용을 그대로 소설화하라):`);
@@ -305,9 +322,7 @@ export function buildSynopsisSection(
     parts.push(`★ 마지막 장면 이미지: ${currentSynopsis.endingImage}`);
   }
 
-  if (currentSynopsis.forbidden) {
-    parts.push(`⛔ 이번 화 금지사항: ${currentSynopsis.forbidden}`);
-  }
+  // forbidden은 이미 시놉시스 본문 앞에 배치됨 (V9.5)
 
   if (currentSynopsis.foreshadowing && currentSynopsis.foreshadowing.length > 0) {
     parts.push(`깔 복선: ${currentSynopsis.foreshadowing.join(', ')}`);
