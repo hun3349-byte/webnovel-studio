@@ -221,12 +221,25 @@ export function buildSynopsisSection(
 
   const parts: string[] = [];
 
-  // ★★★ V9.0.3: 더 강력한 시놉시스 강제 ★★★
+  // ★★★ V9.1: 더 강력한 시놉시스 강제 + 세계관 컨텍스트 ★★★
   parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
   parts.push(`║  🚨🚨🚨 [절대 명령] 시놉시스가 왕이다 - 아래 대본을 100% 따라 써라 🚨🚨🚨   ║`);
   parts.push(`║  시놉시스에 "형장"이라 하면 형장에서 시작하라. 임의 변경 = 실패           ║`);
+  parts.push(`║  시놉시스에 [씬1]~[씬N]이 있으면 모든 씬을 순서대로 포함하라              ║`);
   parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
   parts.push(``);
+
+  // ★★★ V9.1: 세계관 1줄 요약 (장르 오염 방지) ★★★
+  if (context.worldBible) {
+    const wb = context.worldBible;
+    let worldLine = `[세계관]`;
+    if (wb.world_name) worldLine += ` ${wb.world_name}`;
+    if (wb.time_period) worldLine += ` — ${wb.time_period}`;
+    if (wb.power_system_name) worldLine += ` / 힘의 체계: ${wb.power_system_name}`;
+    parts.push(worldLine);
+    parts.push(``);
+  }
+
   parts.push(`<episode_synopsis episode="${currentSynopsis.episodeNumber}">`);
   parts.push(`[${currentSynopsis.episodeNumber}화 시놉시스 - 반드시 이 내용대로 작성]`);
 
@@ -280,6 +293,11 @@ export function buildSynopsisSection(
   parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
   parts.push(`║  ⚠️ 위 시놉시스의 장소, 사건, 순서를 절대 변경하지 마라                      ║`);
   parts.push(`║  시놉시스에 없는 장면을 임의로 추가하지 마라                                 ║`);
+  parts.push(`╠═══════════════════════════════════════════════════════════════════════════════╣`);
+  parts.push(`║  ★ [씬 강제 규칙] 시놉시스에 [씬1], [씬2], [씬3]... 이 있으면:              ║`);
+  parts.push(`║    - 모든 씬을 순서대로 포함해야 한다. 어떤 씬도 건너뛰지 마라.             ║`);
+  parts.push(`║    - 각 씬은 최소 600자 이상 작성해야 한다.                                  ║`);
+  parts.push(`║    - "금지" 또는 "forbidden" 항목의 용어는 이 화에서 절대 사용하지 마라.    ║`);
   parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
 
   return parts.join('\n');
