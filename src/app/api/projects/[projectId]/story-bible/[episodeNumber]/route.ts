@@ -79,7 +79,9 @@ export async function PATCH(
     const allowedFields = [
       'title', 'synopsis', 'goals', 'key_events', 'featured_characters',
       'location', 'time_context', 'arc_name', 'arc_position',
-      'foreshadowing', 'callbacks', 'notes', 'is_written'
+      'foreshadowing', 'callbacks', 'notes', 'is_written',
+      // V9.0 연출 대본 필드
+      'emotion_curve', 'ending_image', 'forbidden', 'scene_beats'
     ];
 
     for (const field of allowedFields) {

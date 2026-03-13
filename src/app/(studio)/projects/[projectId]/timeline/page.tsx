@@ -665,101 +665,35 @@ function CharactersView({ timeline }: { timeline: TimelineItem[] }) {
   );
 }
 
-// ★ 전체 시놉시스 입력 뷰 (v8.4 Dynamic Context 연동)
+// ★ 전체 시놉시스 읽기 전용 뷰 (V9.0.3 UI 통합)
+// 시놉시스 편집은 스토리 바이블에서만 가능
 function GlobalSynopsisView({
   projectId,
   synopsis,
-  setSynopsis,
-  saving,
-  setSaving,
-  onRefresh,
 }: {
   projectId: string;
   synopsis: string;
-  setSynopsis: (value: string) => void;
-  saving: boolean;
-  setSaving: (value: boolean) => void;
-  onRefresh: () => void;
+  setSynopsis?: (value: string) => void;
+  saving?: boolean;
+  setSaving?: (value: boolean) => void;
+  onRefresh?: () => void;
 }) {
-  const [hasChanges, setHasChanges] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [parseMode, setParseMode] = useState<'bulk' | 'individual'>('bulk');
-
-  // 시놉시스 저장 (파싱 후 개별 에피소드로 저장)
-  const handleSave = async () => {
-    if (!synopsis.trim()) {
-      alert('시놉시스를 입력해주세요.');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      // [N화] 형식으로 파싱
-      const episodeSynopses: { episode_number: number; synopsis: string }[] = [];
-      const blocks = synopsis.split(/---/).map(b => b.trim()).filter(Boolean);
-
-      for (const block of blocks) {
-        const match = block.match(/^\[(\d+)화\]\s*([\s\S]*)/);
-        if (match) {
-          const episodeNumber = parseInt(match[1]);
-          const synopsisText = match[2].trim();
-          if (synopsisText) {
-            episodeSynopses.push({
-              episode_number: episodeNumber,
-              synopsis: synopsisText,
-            });
-          }
-        }
+  // synopsis를 파싱하여 에피소드별로 분리
+  const parsedSynopses = synopsis
+    .split(/---/)
+    .map(b => b.trim())
+    .filter(Boolean)
+    .map(block => {
+      const match = block.match(/^\[(\d+)화\]\s*([\s\S]*)/);
+      if (match) {
+        return {
+          episodeNumber: parseInt(match[1]),
+          content: match[2].trim(),
+        };
       }
-
-      if (episodeSynopses.length === 0) {
-        // 파싱 실패 시 전체 텍스트를 1화 시놉시스로 저장
-        episodeSynopses.push({
-          episode_number: 1,
-          synopsis: synopsis.trim(),
-        });
-      }
-
-      // API 호출
-      const res = await fetch(`/api/projects/${projectId}/story-bible`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ synopses: episodeSynopses }),
-      });
-
-      // 응답이 JSON인지 확인
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        throw new Error(`서버 오류 (${res.status}): API가 JSON을 반환하지 않았습니다.`);
-      }
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || '저장 실패');
-      }
-
-      setHasChanges(false);
-      setSuccessMessage(`${episodeSynopses.length}개 시놉시스 저장 완료!`);
-      setTimeout(() => setSuccessMessage(null), 3000);
-      onRefresh();
-    } catch (error) {
-      alert(error instanceof Error ? error.message : '저장 실패');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // 템플릿 삽입
-  const insertTemplate = (start: number, end: number) => {
-    const template = Array.from({ length: end - start + 1 }, (_, i) => {
-      const ep = start + i;
-      return `[${ep}화]\n(${ep}화 시놉시스를 입력하세요)`;
-    }).join('\n\n---\n\n');
-
-    setSynopsis(synopsis ? `${synopsis}\n\n---\n\n${template}` : template);
-    setHasChanges(true);
-  };
+      return null;
+    })
+    .filter(Boolean) as { episodeNumber: number; content: string }[];
 
   return (
     <div className="space-y-6">
@@ -767,135 +701,81 @@ function GlobalSynopsisView({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            📝 전체 시놉시스 입력
+            📖 전체 시놉시스 (읽기 전용)
           </h2>
           <p className="text-sm text-gray-400 mt-1">
-            1~100화의 전체 스토리 시놉시스를 입력하면 AI가 컨텍스트로 활용합니다
+            시놉시스 편집은 스토리 바이블에서 진행해주세요
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {hasChanges && (
-            <span className="text-xs text-amber-400">● 변경사항 있음</span>
-          )}
-          {successMessage && (
-            <span className="text-xs text-green-400">{successMessage}</span>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={saving || !hasChanges}
-            className={`px-4 py-2 rounded-lg font-medium transition ${
-              saving || !hasChanges
-                ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                : 'bg-purple-600 hover:bg-purple-700 text-white'
-            }`}
-          >
-            {saving ? '저장 중...' : '💾 저장'}
-          </button>
-        </div>
+        <Link
+          href={`/projects/${projectId}/story-bible`}
+          className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium transition flex items-center gap-2"
+        >
+          📚 스토리 바이블에서 편집 →
+        </Link>
       </div>
 
       {/* 안내 박스 */}
-      <div className="bg-purple-900/20 border border-purple-700/50 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-purple-300 mb-2">💡 사용 방법</h3>
+      <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-4">
+        <h3 className="text-sm font-semibold text-blue-300 mb-2">💡 시놉시스 Single Source of Truth</h3>
         <ul className="text-xs text-gray-400 space-y-1">
-          <li>• <code className="bg-gray-800 px-1 rounded">[N화]</code> 형식으로 각 에피소드 시놉시스를 구분합니다</li>
-          <li>• 에피소드 사이는 <code className="bg-gray-800 px-1 rounded">---</code> 구분선으로 나눕니다</li>
-          <li>• 저장된 시놉시스는 AI 에피소드 생성 시 Dynamic Context로 전달됩니다</li>
-          <li>• 전체 아크 구조, 주요 사건, 복선 회수 계획 등을 포함하면 좋습니다</li>
+          <li>• <strong className="text-blue-300">스토리 바이블</strong>이 시놉시스의 유일한 편집 공간입니다</li>
+          <li>• 이곳은 스토리 바이블 데이터를 읽기 전용으로 표시합니다</li>
+          <li>• AI 에피소드 생성 시 스토리 바이블의 시놉시스가 자동으로 주입됩니다</li>
+          <li>• 일괄 입력이 필요하면 스토리 바이블의 &quot;일괄 입력&quot; 기능을 사용하세요</li>
         </ul>
       </div>
 
-      {/* 빠른 템플릿 버튼 */}
-      <div className="flex flex-wrap gap-2">
-        <span className="text-sm text-gray-400 py-1">템플릿 삽입:</span>
-        <button
-          onClick={() => insertTemplate(1, 10)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
-        >
-          1~10화
-        </button>
-        <button
-          onClick={() => insertTemplate(11, 20)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
-        >
-          11~20화
-        </button>
-        <button
-          onClick={() => insertTemplate(21, 30)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
-        >
-          21~30화
-        </button>
-        <button
-          onClick={() => insertTemplate(1, 50)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
-        >
-          1~50화
-        </button>
-        <button
-          onClick={() => insertTemplate(1, 100)}
-          className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
-        >
-          1~100화
-        </button>
-      </div>
-
-      {/* 메인 텍스트 입력 */}
-      <div className="relative">
-        <textarea
-          value={synopsis}
-          onChange={(e) => {
-            setSynopsis(e.target.value);
-            setHasChanges(true);
-          }}
-          placeholder={`[1화]
-주인공 무명이 처음 등장하는 장면. 황궁에서의 비밀 임무를 받고 흑풍산맥으로 향한다.
-- 핵심 목표: 주인공 첫인상 각인
-- 복선: 흑풍산맥에 숨겨진 비밀 암시
-
----
-
-[2화]
-흑풍산맥 입구에서 첫 번째 적과 조우.
-- 핵심 목표: 주인공의 전투 능력 시연
-- 복선: 적의 뒤에 더 큰 세력이 있음을 암시
-
----
-
-[3화]
-...`}
-          className="w-full h-[500px] bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none font-mono text-sm leading-relaxed"
-        />
-
-        {/* 글자 수 표시 */}
-        <div className="absolute bottom-3 right-3 text-xs text-gray-500 bg-gray-800/80 px-2 py-1 rounded">
-          {synopsis.length.toLocaleString()}자
+      {/* 시놉시스 목록 (읽기 전용) */}
+      {parsedSynopses.length > 0 ? (
+        <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+          {parsedSynopses.map((syn) => (
+            <div
+              key={syn.episodeNumber}
+              className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 hover:border-purple-600/50 transition"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-purple-400 font-semibold">
+                  [{syn.episodeNumber}화]
+                </span>
+                <Link
+                  href={`/projects/${projectId}/story-bible`}
+                  className="text-xs text-gray-500 hover:text-purple-400 transition"
+                >
+                  편집 →
+                </Link>
+              </div>
+              <p className="text-sm text-gray-300 whitespace-pre-wrap line-clamp-4">
+                {syn.content}
+              </p>
+            </div>
+          ))}
         </div>
-      </div>
+      ) : (
+        <div className="bg-gray-800/30 border border-dashed border-gray-600 rounded-lg p-8 text-center">
+          <p className="text-gray-500 mb-4">등록된 시놉시스가 없습니다</p>
+          <Link
+            href={`/projects/${projectId}/story-bible`}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition"
+          >
+            📚 스토리 바이블에서 시놉시스 작성하기
+          </Link>
+        </div>
+      )}
 
-      {/* 파싱 프리뷰 */}
-      {synopsis && (
-        <div className="bg-gray-800/50 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-300 mb-3">📋 파싱 프리뷰</h3>
-          <div className="flex flex-wrap gap-2">
-            {synopsis.split(/---/).map(b => b.trim()).filter(Boolean).map((block, i) => {
-              const match = block.match(/^\[(\d+)화\]/);
-              if (match) {
-                return (
-                  <span
-                    key={i}
-                    className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs"
-                  >
-                    {match[1]}화
-                  </span>
-                );
-              }
-              return null;
-            })}
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            감지된 에피소드: {synopsis.split(/---/).filter(b => /^\[(\d+)화\]/.test(b.trim())).length}개
+      {/* 요약 정보 */}
+      {parsedSynopses.length > 0 && (
+        <div className="bg-gray-800/50 rounded-lg p-4 flex items-center justify-between">
+          <p className="text-xs text-gray-500">
+            총 {parsedSynopses.length}개 에피소드 시놉시스 |
+            {parsedSynopses.length > 0 && ` ${parsedSynopses[0].episodeNumber}화 ~ ${parsedSynopses[parsedSynopses.length - 1].episodeNumber}화`}
           </p>
+          <Link
+            href={`/projects/${projectId}/story-bible`}
+            className="text-xs text-purple-400 hover:text-purple-300 transition"
+          >
+            전체 보기 및 편집 →
+          </Link>
         </div>
       )}
     </div>

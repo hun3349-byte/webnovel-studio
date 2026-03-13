@@ -96,6 +96,11 @@ export default function StoryBiblePage() {
   const [filterArc, setFilterArc] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'list' | 'timeline'>('list');
 
+  // 일괄 입력 모달
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkSaving, setBulkSaving] = useState(false);
+
   const loadSynopses = useCallback(async () => {
     try {
       setLoading(true);
@@ -261,6 +266,74 @@ export default function StoryBiblePage() {
     }
   };
 
+  // 일괄 입력 저장
+  const handleBulkSave = async () => {
+    if (!bulkText.trim()) {
+      alert('시놉시스를 입력해주세요.');
+      return;
+    }
+
+    setBulkSaving(true);
+    try {
+      // [N화] 형식으로 파싱
+      const episodeSynopses: { episode_number: number; synopsis: string }[] = [];
+      const blocks = bulkText.split(/---/).map(b => b.trim()).filter(Boolean);
+
+      for (const block of blocks) {
+        const match = block.match(/^\[(\d+)화\]\s*([\s\S]*)/);
+        if (match) {
+          const episodeNumber = parseInt(match[1]);
+          const synopsisText = match[2].trim();
+          if (synopsisText) {
+            episodeSynopses.push({
+              episode_number: episodeNumber,
+              synopsis: synopsisText,
+            });
+          }
+        }
+      }
+
+      if (episodeSynopses.length === 0) {
+        alert('[N화] 형식으로 시놉시스를 구분해주세요.\n예: [1화]\\n시놉시스 내용\\n\\n---\\n\\n[2화]\\n시놉시스 내용');
+        setBulkSaving(false);
+        return;
+      }
+
+      // API 호출
+      const res = await fetch(`/api/projects/${projectId}/story-bible`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ synopses: episodeSynopses }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || '저장 실패');
+      }
+
+      setSuccessMessage(`${episodeSynopses.length}개 시놉시스 저장 완료!`);
+      setTimeout(() => setSuccessMessage(null), 3000);
+      setShowBulkModal(false);
+      setBulkText('');
+      loadSynopses();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : '저장 실패');
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
+  // 일괄 입력 템플릿
+  const insertBulkTemplate = (start: number, end: number) => {
+    const template = Array.from({ length: end - start + 1 }, (_, i) => {
+      const ep = start + i;
+      return `[${ep}화]\n(${ep}화 시놉시스를 입력하세요)`;
+    }).join('\n\n---\n\n');
+
+    setBulkText(bulkText ? `${bulkText}\n\n---\n\n${template}` : template);
+  };
+
   // 아크 목록 추출
   const arcs = Array.from(new Set(synopses.map(s => s.arc_name).filter(Boolean)));
 
@@ -282,17 +355,30 @@ export default function StoryBiblePage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">스토리 바이블</h1>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            📚 스토리 바이블
+            <span className="px-2 py-0.5 bg-purple-900/50 text-purple-300 rounded text-xs font-normal">
+              Single Source of Truth
+            </span>
+          </h1>
           <p className="text-gray-400 text-sm mt-1">
-            에피소드별 시놉시스와 타임라인을 관리합니다
+            시놉시스의 유일한 편집 공간입니다. AI 에피소드 생성 시 여기서 작성한 시놉시스가 자동으로 주입됩니다.
           </p>
         </div>
-        <button
-          onClick={handleNew}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition"
-        >
-          + 시놉시스 추가
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowBulkModal(true)}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition"
+          >
+            📝 일괄 입력
+          </button>
+          <button
+            onClick={handleNew}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition"
+          >
+            + 시놉시스 추가
+          </button>
+        </div>
       </div>
 
       {/* 메시지 */}
@@ -692,6 +778,130 @@ export default function StoryBiblePage() {
               >
                 {saving ? '저장 중...' : '저장'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄 입력 모달 */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold flex items-center gap-2">
+                  📝 시놉시스 일괄 입력
+                </h2>
+                <p className="text-sm text-gray-400 mt-1">
+                  여러 에피소드의 시놉시스를 한 번에 입력합니다
+                </p>
+              </div>
+              <button
+                onClick={() => setShowBulkModal(false)}
+                className="text-gray-400 hover:text-white text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* 안내 박스 */}
+              <div className="bg-purple-900/20 border border-purple-700/50 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-purple-300 mb-2">💡 사용 방법</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• <code className="bg-gray-800 px-1 rounded">[N화]</code> 형식으로 각 에피소드 시놉시스를 시작합니다</li>
+                  <li>• 에피소드 사이는 <code className="bg-gray-800 px-1 rounded">---</code> 구분선으로 나눕니다</li>
+                  <li>• 기존 시놉시스가 있으면 덮어씁니다 (Upsert)</li>
+                </ul>
+              </div>
+
+              {/* 빠른 템플릿 버튼 */}
+              <div className="flex flex-wrap gap-2">
+                <span className="text-sm text-gray-400 py-1">템플릿 삽입:</span>
+                {[[1, 10], [11, 20], [21, 30], [1, 50], [1, 100]].map(([start, end]) => (
+                  <button
+                    key={`${start}-${end}`}
+                    onClick={() => insertBulkTemplate(start, end)}
+                    className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded text-xs transition"
+                  >
+                    {start}~{end}화
+                  </button>
+                ))}
+              </div>
+
+              {/* 메인 텍스트 입력 */}
+              <div className="relative">
+                <textarea
+                  value={bulkText}
+                  onChange={(e) => setBulkText(e.target.value)}
+                  placeholder={`[1화]
+[씬1] 형장 — 새벽 안개 속 처형대. 주인공은 목이 잘리기 직전 눈을 뜬다.
+[씬2] 감옥 — 낯선 몸, 낯선 기억. 누군가의 몸에 빙의했음을 깨달음.
+[씬3] 심문 — 장로가 찾아와 의미심장한 질문. 주인공은 능청스럽게 응수.
+목표: 주인공 첫인상 각인, 빙의 세계관 도입
+
+---
+
+[2화]
+[씬1] 감옥 탈출 시도 — 쇠창살 너머로 탈출로 탐색.
+...`}
+                  className="w-full h-[400px] bg-gray-800 border border-gray-700 rounded-lg p-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none font-mono text-sm leading-relaxed"
+                />
+                <div className="absolute bottom-3 right-3 text-xs text-gray-500 bg-gray-800/80 px-2 py-1 rounded">
+                  {bulkText.length.toLocaleString()}자
+                </div>
+              </div>
+
+              {/* 파싱 프리뷰 */}
+              {bulkText && (
+                <div className="bg-gray-800/50 rounded-lg p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-3">📋 파싱 프리뷰</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {bulkText.split(/---/).map(b => b.trim()).filter(Boolean).map((block, i) => {
+                      const match = block.match(/^\[(\d+)화\]/);
+                      if (match) {
+                        return (
+                          <span
+                            key={i}
+                            className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs"
+                          >
+                            {match[1]}화
+                          </span>
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    감지된 에피소드: {bulkText.split(/---/).filter(b => /^\[(\d+)화\]/.test(b.trim())).length}개
+                  </p>
+                </div>
+              )}
+
+              {/* 버튼 */}
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                <button
+                  onClick={() => {
+                    setShowBulkModal(false);
+                    setBulkText('');
+                  }}
+                  disabled={bulkSaving}
+                  className="px-4 py-2 text-gray-400 hover:text-white transition"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleBulkSave}
+                  disabled={bulkSaving || !bulkText.trim()}
+                  className={`px-6 py-2 rounded-lg font-medium transition ${
+                    bulkSaving || !bulkText.trim()
+                      ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                  }`}
+                >
+                  {bulkSaving ? '저장 중...' : '💾 일괄 저장'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

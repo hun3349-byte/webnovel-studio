@@ -237,6 +237,22 @@ export function StoryBiblePanel({
       {/* 시놉시스 탭 */}
       {activeTab === 'synopsis' && (
         <div className="flex-1 overflow-y-auto space-y-4">
+          {/* 스토리 바이블 동기화 표시 */}
+          <div className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1 text-blue-400">
+              <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+              스토리 바이블과 동기화됨
+            </span>
+            <a
+              href={`/projects/${projectId}/story-bible`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-gray-400 hover:text-blue-400 transition"
+            >
+              전체 보기 →
+            </a>
+          </div>
+
           {/* 메인 시놉시스 */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">

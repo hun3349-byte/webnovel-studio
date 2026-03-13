@@ -25,6 +25,11 @@ interface EpisodeSynopsis {
   is_written: boolean;
   created_at: string;
   updated_at: string;
+  // V9.0 연출 대본 필드
+  emotion_curve: string | null;
+  ending_image: string | null;
+  forbidden: string | null;
+  scene_beats: string | null;
 }
 
 /**
@@ -151,6 +156,11 @@ export async function POST(
       foreshadowing,
       callbacks,
       notes,
+      // V9.0 연출 대본 필드
+      emotion_curve,
+      ending_image,
+      forbidden,
+      scene_beats,
     } = body;
 
     if (!episode_number || episode_number < 1) {
@@ -184,6 +194,11 @@ export async function POST(
         foreshadowing: foreshadowing || null,
         callbacks: callbacks || null,
         notes: notes || null,
+        // V9.0 연출 대본 필드
+        emotion_curve: emotion_curve || null,
+        ending_image: ending_image || null,
+        forbidden: forbidden || null,
+        scene_beats: scene_beats || null,
       })
       .select()
       .single();
@@ -267,6 +282,11 @@ export async function PUT(
             foreshadowing: synopsis.foreshadowing || null,
             callbacks: synopsis.callbacks || null,
             notes: synopsis.notes || null,
+            // V9.0 연출 대본 필드
+            emotion_curve: synopsis.emotion_curve || null,
+            ending_image: synopsis.ending_image || null,
+            forbidden: synopsis.forbidden || null,
+            scene_beats: synopsis.scene_beats || null,
           },
           { onConflict: 'project_id,episode_number' }
         )

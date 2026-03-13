@@ -798,6 +798,28 @@ onHeartbeat: () => {
     - 컨텍스트 시놉시스 상태 상세 로깅
     - 프롬프트 내 시놉시스 검증 로그
 
+- [x] **🔧 시놉시스 UI/UX 통합** — Single Source of Truth 확립
+  - **문제점 해결**
+    - 기존: 시놉시스 입력이 3곳 (타임라인, 스토리 바이블, 에피소드 에디터)
+    - 해결: 스토리 바이블이 유일한 편집 공간 (Single Source of Truth)
+  - **타임라인 "전체 시놉시스" 탭 변경** (`src/app/(studio)/projects/[projectId]/timeline/page.tsx`)
+    - 입력/저장 기능 → 읽기 전용으로 변경
+    - 스토리 바이블 데이터를 표시만 함
+    - "스토리 바이블에서 편집" 링크 추가
+  - **스토리 바이블 개선** (`src/app/(studio)/projects/[projectId]/story-bible/page.tsx`)
+    - "📚 Single Source of Truth" 배지 추가
+    - "📝 일괄 입력" 버튼 및 모달 추가 (타임라인에서 이동)
+    - [N화] 형식 파싱, 템플릿 삽입 기능
+  - **에피소드 에디터 StoryBiblePanel 개선** (`src/components/editor/StoryBiblePanel.tsx`)
+    - "스토리 바이블과 동기화됨" 표시 추가
+    - 스토리 바이블 전체 보기 링크 추가
+  - **V9.0 DB 필드 마이그레이션** (`supabase/migrations/00008_add_synopsis_v9_fields.sql`)
+    - emotion_curve, ending_image, forbidden, scene_beats 컬럼 추가
+    - get_synopsis_context() RPC 함수 업데이트
+  - **Story Bible API V9.0 필드 지원**
+    - POST, PUT, PATCH에 V9.0 필드 추가
+    - allowedFields 배열 업데이트
+
 ---
 
 ## 상업적 집필 규칙 (V9.0.1 - 설명집 문제 해결)
