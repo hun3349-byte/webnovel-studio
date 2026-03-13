@@ -136,29 +136,19 @@ export async function POST(request: NextRequest) {
         console.log('[PROMPT-DEBUG] ===== END PROMPT DEBUG =====');
 
         // ★★★ 작업 1: 프롬프트 덤프 (디버깅 후 삭제) ★★★
-        try {
-          const debugSupabase = await createServerSupabaseClient();
-          await debugSupabase.from('episode_logs').insert({
-            project_id: projectId,
-            episode_number: 9999, // 디버깅용 임시 번호
-            summary: JSON.stringify({
-              timestamp: new Date().toISOString(),
-              systemPromptLength: systemPrompt.length,
-              userPromptFirst1500: userPrompt.substring(0, 1500),
-              userPromptLast500: userPrompt.substring(userPrompt.length - 500),
-              hasSynopsisMarker: userPrompt.includes('synopsis') || userPrompt.includes('시놉시스') || userPrompt.includes('형장') || userPrompt.includes('████'),
-              synopsesInContext: context.episodeSynopses?.length || 0,
-              currentSynopsis: context.episodeSynopses?.find(s => s.isCurrent)?.synopsis?.substring(0, 300) || 'NONE',
-              currentSynopsisByEpNum: context.episodeSynopses?.find(s => s.episodeNumber === targetEpisodeNumber)?.synopsis?.substring(0, 300) || 'NONE',
-              targetEpisodeNumber,
-              hasEpisodeSynopsisTag,
-            }),
-            log_status: 'completed',
-          });
-          console.log('[DUMP] ✅ 프롬프트 덤프 저장 완료 (episode_number: 9999)');
-        } catch (dumpError) {
-          console.error('[DUMP] ❌ 프롬프트 덤프 실패:', dumpError);
-        }
+        // 콘솔에만 출력 (DB 스키마 충돌 방지)
+        console.log('[DUMP] ===== 프롬프트 덤프 시작 =====');
+        console.log('[DUMP] timestamp:', new Date().toISOString());
+        console.log('[DUMP] systemPromptLength:', systemPrompt.length);
+        console.log('[DUMP] userPromptLength:', userPrompt.length);
+        console.log('[DUMP] synopsesInContext:', context.episodeSynopses?.length || 0);
+        console.log('[DUMP] currentSynopsis:', context.episodeSynopses?.find(s => s.isCurrent)?.synopsis?.substring(0, 300) || 'NONE');
+        console.log('[DUMP] currentSynopsisByEpNum:', context.episodeSynopses?.find(s => s.episodeNumber === targetEpisodeNumber)?.synopsis?.substring(0, 300) || 'NONE');
+        console.log('[DUMP] hasSynopsisMarker:', userPrompt.includes('synopsis') || userPrompt.includes('시놉시스') || userPrompt.includes('형장') || userPrompt.includes('████'));
+        console.log('[DUMP] hasEpisodeSynopsisTag:', hasEpisodeSynopsisTag);
+        console.log('[DUMP] targetEpisodeNumber:', targetEpisodeNumber);
+        console.log('[DUMP] userPromptFirst1000:', userPrompt.substring(0, 1000));
+        console.log('[DUMP] ===== 프롬프트 덤프 끝 =====');
 
         // ★★★ 작업 3: 1화 하드코딩 테스트 (테스트 후 삭제) ★★★
         let finalUserPrompt = userPrompt;
