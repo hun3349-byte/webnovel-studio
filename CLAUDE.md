@@ -820,9 +820,50 @@ onHeartbeat: () => {
     - POST, PUT, PATCH에 V9.0 필드 추가
     - allowedFields 배열 업데이트
 
+- [x] **🔧 V9.3 패치** — 하드코딩 제거 + 다중 사용자 대응
+  - **프론트엔드 API 호출 수정** (`src/app/(studio)/projects/[projectId]/episodes/[episodeId]/page.tsx`)
+    - 기존: 프론트엔드에서 직접 context 객체 조립 → 시놉시스 누락
+    - 수정: `projectId`만 전달 → 서버에서 `buildSlidingWindowContext()` 호출
+    - `/api/ai/test-generate` 엔드포인트 사용
+  - **test-generate API 수정** (`src/app/api/ai/test-generate/route.ts`)
+    - `includeSynopses: true` 명시적 활성화
+    - 시놉시스 로딩 상태 디버그 로깅 추가
+  - **프롬프트 주입기 장르 중립화** (`src/core/engine/prompt-injector.ts`)
+    - 무협 특화 규칙 제거 (정파/사파/장로 등)
+    - 장르 규칙은 World Bible DB의 `forbidden_elements`에서 로드
+    - 다중 프로젝트(무협/현대/SF 등) 동시 지원 가능
+
+- [x] **🔧 V9.4 패치** — 분량 부족 해결
+  - **문제점**: AI가 2,100~2,400자만 생성 (목표: 4,000~6,000자)
+  - **ABSOLUTE_RULES 분량 규칙 강화** (규칙 4번)
+    - 공백 포함 4,000자 이상 필수, 4,000자 미만 = 실패
+    - 씬이 4개면 각 씬 최소 800자 이상
+    - 분량 부족 시: 감각 묘사 추가, 동작 프레임 분해, 대사 전후 행동 묘사
+  - **WRITING_PIPELINE_DIRECTIVE 분량 강조**
+    - `[분량 필수]` 섹션 추가
+    - 소설 본문 4,000자 이상, 각 씬 800자 이상
+    - 모든 씬 완료 후에만 끝내기
+  - **buildUserPromptV9() 분량 리마인더**
+    - `<output_format>` 섹션에 분량 규칙 재강조
+    - 프롬프트 맨 끝에 `[분량 필수]` 체크리스트 추가
+
+- [x] **🔧 V9.5 패치** — 금지사항(forbidden) 강제성 극강화
+  - **문제점**: 시놉시스에 "전귀검법 이름 언급 금지" 설정해도 AI가 무시
+  - **ABSOLUTE_RULES 7번 규칙 강화**
+    - 기존: "시놉시스의 [금지] 항목에 적힌 내용을 반드시 지켜라"
+    - 변경: 금지사항 = 에피소드 성공/실패 결정 최우선 규칙
+    - 금지된 단어/이름/장면은 어떤 상황에서도 출력 금지
+    - 문맥상/분위기상 어울려 보여도 절대 사용 금지
+    - 금지사항 위반 = 에피소드 전체 실패 → 처음부터 재작성
+  - **buildSynopsisSection() forbidden 배치 최적화**
+    - forbidden 섹션을 시놉시스 **본문보다 앞에** 배치 (최우선 강조)
+    - 시각적 강조: `⛔⛔⛔ [이번 화 금지사항 — 위반 시 에피소드 실패] ⛔⛔⛔`
+    - 각 금지 항목 개별 강조: `❌ 전귀검법 이름 언급 금지`
+    - 기존 중복 forbidden 출력 제거
+
 ---
 
-## 상업적 집필 규칙 (V9.0.1 - 설명집 문제 해결)
+## 상업적 집필 규칙 (V9.5 - 금지사항 극강화)
 
 ### V9.0 프롬프트 아키텍처 개요
 
