@@ -68,14 +68,42 @@ export async function POST(request: NextRequest) {
         enqueue(createHeartbeatMessage('작가 AI가 이전 회차를 읽고 있습니다...'));
 
         // 2. 슬라이딩 윈도우 컨텍스트 빌드
+        // ★★★ V9.0.3: includeSynopses 명시적 활성화 ★★★
         const context = await buildSlidingWindowContext(projectId, targetEpisodeNumber, {
           windowSize,
           longTermSearchQueries,
           includeWritingPreferences: true,
+          includeSynopses: true, // 시놉시스 필수 로드
+          includeTimelineEvents: true,
         });
 
         // 3. Heartbeat: 프롬프트 조립 알림
         enqueue(createHeartbeatMessage('세계관과 캐릭터 정보를 분석 중...'));
+
+        // ★★★ V9.0.3: 시놉시스 주입 상태 확인 (컨텍스트 단계) ★★★
+        console.log('[SYNOPSIS-DEBUG] ===== 컨텍스트 시놉시스 확인 =====');
+        console.log('[SYNOPSIS-DEBUG] episodeSynopses 존재:', !!context.episodeSynopses);
+        console.log('[SYNOPSIS-DEBUG] episodeSynopses 개수:', context.episodeSynopses?.length || 0);
+        if (context.episodeSynopses && context.episodeSynopses.length > 0) {
+          const synopsesList = context.episodeSynopses.map(s => ({
+            ep: s.episodeNumber,
+            isCurrent: s.isCurrent,
+            synLen: s.synopsis?.length || 0,
+          }));
+          console.log('[SYNOPSIS-DEBUG] 시놉시스 목록:', JSON.stringify(synopsesList));
+
+          const currentSyn = context.episodeSynopses.find(s => s.isCurrent) ||
+                             context.episodeSynopses.find(s => s.episodeNumber === targetEpisodeNumber);
+          if (currentSyn) {
+            console.log('[SYNOPSIS-DEBUG] ✅ 현재 회차 시놉시스 발견:', {
+              episodeNumber: currentSyn.episodeNumber,
+              synopsis: currentSyn.synopsis?.substring(0, 150),
+              sceneBeats: currentSyn.sceneBeats?.substring(0, 100),
+            });
+          } else {
+            console.error('[SYNOPSIS-DEBUG] ❌ 현재 회차 시놉시스를 찾을 수 없음!');
+          }
+        }
 
         // 4. 프롬프트 조립
         const { systemPrompt, userPrompt } = buildEpisodeGenerationPrompts(
@@ -84,28 +112,28 @@ export async function POST(request: NextRequest) {
           targetEpisodeNumber
         );
 
-        // ★★★ 디버깅: 시놉시스 주입 확인 ★★★
-        console.log('[DEBUG] ===== PROMPT LENGTH =====');
-        console.log(`System prompt: ${systemPrompt.length}자`);
-        console.log(`User prompt: ${userPrompt.length}자`);
+        // ★★★ V9.0.3: 프롬프트 내 시놉시스 포함 검증 ★★★
+        console.log('[PROMPT-DEBUG] ===== 최종 프롬프트 검증 =====');
+        console.log(`[PROMPT-DEBUG] System prompt: ${systemPrompt.length}자`);
+        console.log(`[PROMPT-DEBUG] User prompt: ${userPrompt.length}자`);
 
-        // 시놉시스 포함 여부 확인
-        const hasSynopsis = userPrompt.includes('시놉시스') ||
-                           userPrompt.includes('synopsis') ||
-                           userPrompt.includes('episode_synopsis') ||
-                           userPrompt.includes('핵심 사건') ||
-                           userPrompt.includes('씬1') ||
-                           userPrompt.includes('[씬');
-        console.log(`[DEBUG] 시놉시스 키워드 포함 여부: ${hasSynopsis}`);
+        // 시놉시스 태그 포함 여부 확인
+        const hasEpisodeSynopsisTag = userPrompt.includes('<episode_synopsis');
+        const hasSynopsisKeyword = userPrompt.includes('시놉시스');
+        const hasReminderSection = userPrompt.includes('최종 확인');
 
-        if (!hasSynopsis) {
-          console.error('[CRITICAL] ★★★ 시놉시스가 프롬프트에 포함되지 않음! ★★★');
+        console.log(`[PROMPT-DEBUG] <episode_synopsis> 태그 포함: ${hasEpisodeSynopsisTag}`);
+        console.log(`[PROMPT-DEBUG] '시놉시스' 키워드 포함: ${hasSynopsisKeyword}`);
+        console.log(`[PROMPT-DEBUG] 최종 확인 리마인더 포함: ${hasReminderSection}`);
+
+        if (!hasEpisodeSynopsisTag) {
+          console.error('[CRITICAL] ❌ <episode_synopsis> 태그가 프롬프트에 없음!');
         }
 
-        // 유저 프롬프트 처음 800자 출력 (시놉시스가 최상단에 있는지 확인)
-        console.log('[DEBUG] User prompt 처음 800자:');
-        console.log(userPrompt.substring(0, 800));
-        console.log('[DEBUG] ===== END PROMPT DEBUG =====');
+        // 유저 프롬프트 처음 500자 출력 (시놉시스가 최상단에 있는지 확인)
+        console.log('[PROMPT-DEBUG] User prompt 처음 500자:');
+        console.log(userPrompt.substring(0, 500));
+        console.log('[PROMPT-DEBUG] ===== END PROMPT DEBUG =====');
 
         // 5. Claude API 스트리밍 호출
         // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★

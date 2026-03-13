@@ -177,21 +177,41 @@ export function buildCompactWorldSection(worldBible: SlidingWindowContext['world
 }
 
 // ============================================================================
-// 시놉시스 섹션 빌더 (최상단 배치용) - V9.0.2 강제성 강화
+// 시놉시스 섹션 빌더 (최상단 배치용) - V9.0.3 isCurrent fallback 추가
 // ============================================================================
-export function buildSynopsisSection(context: SlidingWindowContext): string {
-  const currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
+export function buildSynopsisSection(
+  context: SlidingWindowContext,
+  targetEpisodeNumber?: number
+): string {
+  // 1차: isCurrent로 찾기
+  let currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
 
-  // 디버깅 로그
-  console.log('[DEBUG] buildSynopsisSection 호출:', {
+  // 2차 Fallback: episodeNumber로 직접 매칭
+  if (!currentSynopsis && targetEpisodeNumber && context.episodeSynopses) {
+    currentSynopsis = context.episodeSynopses.find(
+      s => s.episodeNumber === targetEpisodeNumber
+    );
+    if (currentSynopsis) {
+      console.log('[SYNOPSIS-DEBUG] isCurrent fallback 사용:', {
+        targetEpisodeNumber,
+        foundEpisode: currentSynopsis.episodeNumber,
+      });
+    }
+  }
+
+  // 디버깅 로그 (V9.0.3 강화)
+  console.log('[SYNOPSIS-DEBUG] buildSynopsisSection 호출:', {
     hasSynopses: !!context.episodeSynopses,
     synopsesCount: context.episodeSynopses?.length || 0,
+    targetEpisodeNumber,
+    allEpisodeNumbers: context.episodeSynopses?.map(s => s.episodeNumber) || [],
     currentFound: !!currentSynopsis,
     currentEpisode: currentSynopsis?.episodeNumber,
+    synopsisPreview: currentSynopsis?.synopsis?.substring(0, 80) || 'NONE',
   });
 
   if (!currentSynopsis) {
-    console.error('[CRITICAL] ★★★ 현재 회차 시놉시스를 찾을 수 없음! ★★★');
+    console.error('[CRITICAL] ★★★ 현재 회차 시놉시스를 찾을 수 없음! Story Bible 확인 필요 ★★★');
     return `
 <episode_synopsis>
 [⚠️ 시놉시스 없음] PD 지시사항을 따라 자유롭게 작성하되, 절대 규칙은 반드시 준수할 것.
@@ -201,23 +221,33 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
 
   const parts: string[] = [];
 
-  // ★★★ V9.0.2: 강제 래핑 ★★★
-  parts.push(`████████████████████████████████████████████████████████████`);
-  parts.push(`██  [절대 명령] 아래 시놉시스 대본을 그대로 따라 써라  ██`);
-  parts.push(`██  시놉시스에 없는 장면을 만들어내면 실패다           ██`);
-  parts.push(`████████████████████████████████████████████████████████████`);
+  // ★★★ V9.0.3: 더 강력한 시놉시스 강제 ★★★
+  parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
+  parts.push(`║  🚨🚨🚨 [절대 명령] 시놉시스가 왕이다 - 아래 대본을 100% 따라 써라 🚨🚨🚨   ║`);
+  parts.push(`║  시놉시스에 "형장"이라 하면 형장에서 시작하라. 임의 변경 = 실패           ║`);
+  parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
   parts.push(``);
-  parts.push(`<episode_synopsis>`);
-  parts.push(`[${currentSynopsis.episodeNumber}화 핵심 시놉시스 - 반드시 이 내용대로 작성할 것]`);
+  parts.push(`<episode_synopsis episode="${currentSynopsis.episodeNumber}">`);
+  parts.push(`[${currentSynopsis.episodeNumber}화 시놉시스 - 반드시 이 내용대로 작성]`);
 
   if (currentSynopsis.title) {
     parts.push(`제목: ${currentSynopsis.title}`);
   }
 
-  parts.push(`★ 시놉시스: ${currentSynopsis.synopsis}`);
+  // ★★★ 핵심 시놉시스 (가장 중요) ★★★
+  parts.push(``);
+  parts.push(`★★★ 핵심 시놉시스 (이 내용을 그대로 소설화하라):`);
+  parts.push(`${currentSynopsis.synopsis}`);
+  parts.push(``);
+
+  if (currentSynopsis.sceneBeats) {
+    parts.push(`★★★ 씬 대본 (이 순서대로 작성):`);
+    parts.push(`${currentSynopsis.sceneBeats}`);
+    parts.push(``);
+  }
 
   if (currentSynopsis.goals && currentSynopsis.goals.length > 0) {
-    parts.push(`★ 목표: ${currentSynopsis.goals.join(' / ')}`);
+    parts.push(`★ 이번 화 목표: ${currentSynopsis.goals.join(' / ')}`);
   }
 
   if (currentSynopsis.keyEvents && currentSynopsis.keyEvents.length > 0) {
@@ -237,10 +267,6 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
     parts.push(`⛔ 이번 화 금지사항: ${currentSynopsis.forbidden}`);
   }
 
-  if (currentSynopsis.sceneBeats) {
-    parts.push(`★ 씬 대본: ${currentSynopsis.sceneBeats}`);
-  }
-
   if (currentSynopsis.foreshadowing && currentSynopsis.foreshadowing.length > 0) {
     parts.push(`깔 복선: ${currentSynopsis.foreshadowing.join(', ')}`);
   }
@@ -251,9 +277,10 @@ export function buildSynopsisSection(context: SlidingWindowContext): string {
 
   parts.push(`</episode_synopsis>`);
   parts.push(``);
-  parts.push(`████████████████████████████████████████████████████████████`);
-  parts.push(`██  위 시놉시스의 씬 순서와 장소를 반드시 따를 것       ██`);
-  parts.push(`████████████████████████████████████████████████████████████`);
+  parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
+  parts.push(`║  ⚠️ 위 시놉시스의 장소, 사건, 순서를 절대 변경하지 마라                      ║`);
+  parts.push(`║  시놉시스에 없는 장면을 임의로 추가하지 마라                                 ║`);
+  parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
 
   return parts.join('\n');
 }
@@ -324,7 +351,7 @@ export function buildSystemPromptV9(targetEpisodeNumber: number): string {
 }
 
 // ============================================================================
-// V9.0 유저 프롬프트 빌더
+// V9.0.3 유저 프롬프트 빌더 - 시놉시스 최우선 배치 강화
 // ============================================================================
 export function buildUserPromptV9(
   context: SlidingWindowContext,
@@ -333,10 +360,15 @@ export function buildUserPromptV9(
 ): string {
   const sections: string[] = [];
 
-  // 1. 시놉시스 (최상단 배치)
-  sections.push(buildSynopsisSection(context));
+  // ★★★ 0. 시놉시스 (절대 최상단 - 프롬프트의 첫 번째 내용) ★★★
+  const synopsisSection = buildSynopsisSection(context, targetEpisodeNumber);
+  sections.push(synopsisSection);
 
-  // 2. PD 지시사항
+  // 디버깅 로그
+  console.log('[PROMPT-DEBUG] 시놉시스 섹션 길이:', synopsisSection.length);
+  console.log('[PROMPT-DEBUG] 시놉시스 섹션 처음 200자:', synopsisSection.substring(0, 200));
+
+  // 1. PD 지시사항
   sections.push(`
 <pd_instruction>
 ${targetEpisodeNumber}화 작성 요청:
@@ -344,26 +376,26 @@ ${userInstruction}
 </pd_instruction>
 `);
 
-  // 3. 직전 화 엔딩 (800자)
+  // 2. 직전 화 엔딩 (800자) - 이어쓰기용
   if (targetEpisodeNumber > 1) {
     sections.push(buildPreviousEndingSection(context));
   }
 
-  // 4. 등장인물 (컴팩트)
+  // 3. 등장인물 (컴팩트)
   sections.push(buildCompactCharacterSection(context.activeCharacters));
 
-  // 5. 세계관 (컴팩트)
+  // 4. 세계관 (컴팩트)
   sections.push(buildCompactWorldSection(context.worldBible));
 
-  // 6. 직전 회차 요약 (200자)
+  // 5. 직전 회차 요약 (200자)
   if (targetEpisodeNumber > 1) {
     sections.push(buildPreviousSummarySection(context));
   }
 
-  // 7. 집필 파이프라인 지시문
+  // 6. 집필 파이프라인 지시문
   sections.push(WRITING_PIPELINE_DIRECTIVE);
 
-  // 8. 분량 및 비율 강조
+  // 7. 분량 및 비율 강조
   sections.push(`
 <output_format>
 - [Scene Plan] 작성 후 [Prose]에 본문 작성
@@ -375,47 +407,107 @@ ${userInstruction}
 </output_format>
 `);
 
-  // 9. ★★★ V9.0.2: 시놉시스 최종 리마인더 ★★★
-  const currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
-  if (currentSynopsis) {
-    const firstScene = currentSynopsis.sceneBeats?.split('\n')[0] ||
-                       currentSynopsis.synopsis?.substring(0, 50) || '';
-    sections.push(`
-████████████████████████████████████████████████████████████
-[최종 확인] ${targetEpisodeNumber}화를 작성한다.
-위 시놉시스의 첫 번째 씬부터 시작하라: "${firstScene}..."
-시놉시스에 적힌 장소와 사건 순서를 절대 변경하지 마라.
-████████████████████████████████████████████████████████████
-`);
+  // ★★★ 8. V9.0.3: 시놉시스 최종 리마인더 (프롬프트 끝에 다시 강조) ★★★
+  // isCurrent fallback 적용
+  let currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
+  if (!currentSynopsis && context.episodeSynopses) {
+    currentSynopsis = context.episodeSynopses.find(s => s.episodeNumber === targetEpisodeNumber);
   }
 
-  return sections.filter(Boolean).join('\n');
+  if (currentSynopsis) {
+    const firstScene = currentSynopsis.sceneBeats?.split('\n')[0] ||
+                       currentSynopsis.keyEvents?.[0] ||
+                       currentSynopsis.synopsis?.substring(0, 80) || '';
+    sections.push(`
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║  🚨 [최종 확인] ${targetEpisodeNumber}화 집필 시작                                            ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+다시 한번 확인: 위 <episode_synopsis>에 적힌 내용을 100% 따라 작성하라.
+
+첫 번째 씬: "${firstScene}"
+→ 이 씬부터 시작하라. 시놉시스에 없는 장면을 임의로 추가하지 마라.
+
+시놉시스 = 왕. AI 작가 = 시놉시스를 소설화하는 집행자.
+`);
+  } else {
+    console.error('[PROMPT-DEBUG] ⚠️ 최종 리마인더 생성 불가 - 시놉시스 없음');
+  }
+
+  const finalPrompt = sections.filter(Boolean).join('\n');
+
+  // 최종 프롬프트 디버깅
+  console.log('[PROMPT-DEBUG] 최종 유저 프롬프트 구성:', {
+    totalLength: finalPrompt.length,
+    hasSynopsis: finalPrompt.includes('<episode_synopsis'),
+    hasReminder: finalPrompt.includes('최종 확인'),
+    first100Chars: finalPrompt.substring(0, 100),
+  });
+
+  return finalPrompt;
 }
 
 // ============================================================================
-// V9.0 에피소드 생성 프롬프트 조립 (메인 함수)
+// V9.0.3 에피소드 생성 프롬프트 조립 (메인 함수)
 // ============================================================================
 export function buildEpisodeGenerationPrompts(
   context: SlidingWindowContext,
   userInstruction: string,
   targetEpisodeNumber: number
 ): { systemPrompt: string; userPrompt: string } {
+  // ★★★ V9.0.3: 시놉시스 디버깅 강화 ★★★
+  const synopsesInfo = context.episodeSynopses || [];
+  const currentByFlag = synopsesInfo.find(s => s.isCurrent);
+  const currentByNumber = synopsesInfo.find(s => s.episodeNumber === targetEpisodeNumber);
+
+  console.log('[SYNOPSIS-DEBUG] ===== 프롬프트 생성 시작 =====');
+  console.log('[SYNOPSIS-DEBUG] targetEpisodeNumber:', targetEpisodeNumber);
+  console.log('[SYNOPSIS-DEBUG] 시놉시스 배열 길이:', synopsesInfo.length);
+  console.log('[SYNOPSIS-DEBUG] 시놉시스 에피소드 목록:', synopsesInfo.map(s => s.episodeNumber));
+  console.log('[SYNOPSIS-DEBUG] isCurrent로 찾음:', !!currentByFlag, currentByFlag?.episodeNumber);
+  console.log('[SYNOPSIS-DEBUG] episodeNumber로 찾음:', !!currentByNumber, currentByNumber?.episodeNumber);
+
+  if (currentByFlag || currentByNumber) {
+    const syn = currentByFlag || currentByNumber;
+    console.log('[SYNOPSIS-DEBUG] ✅ 시놉시스 발견:', {
+      episodeNumber: syn?.episodeNumber,
+      title: syn?.title,
+      synopsisLength: syn?.synopsis?.length,
+      synopsisPreview: syn?.synopsis?.substring(0, 100),
+      hasSceneBeats: !!syn?.sceneBeats,
+      sceneBeatsPreview: syn?.sceneBeats?.substring(0, 100),
+    });
+  } else {
+    console.error('[SYNOPSIS-DEBUG] ❌ 시놉시스를 찾을 수 없음!');
+  }
+
   // 컨텍스트 로딩 로그
-  console.log('[PromptInjector V9.0] 프롬프트 생성:', {
+  console.log('[PROMPT-DEBUG] 컨텍스트 상태:', {
     episode: targetEpisodeNumber,
     hasWorldBible: !!context.worldBible,
     characterCount: context.activeCharacters?.length || 0,
-    hasSynopsis: context.episodeSynopses?.some(s => s.isCurrent) || false,
     hasPreviousEnding: !!context.previousEpisodeEnding,
+    previousEndingLength: context.previousEpisodeEnding?.length || 0,
   });
 
   const systemPrompt = buildSystemPromptV9(targetEpisodeNumber);
   const userPrompt = buildUserPromptV9(context, userInstruction, targetEpisodeNumber);
 
-  console.log('[PromptInjector V9.0] 토큰 추정:', {
-    systemPromptChars: systemPrompt.length,
-    userPromptChars: userPrompt.length,
-  });
+  // 최종 검증 로그
+  console.log('[PROMPT-DEBUG] ===== 프롬프트 생성 완료 =====');
+  console.log('[PROMPT-DEBUG] 시스템 프롬프트 길이:', systemPrompt.length);
+  console.log('[PROMPT-DEBUG] 유저 프롬프트 길이:', userPrompt.length);
+  console.log('[PROMPT-DEBUG] 유저 프롬프트 시작:', userPrompt.substring(0, 300));
+
+  // 시놉시스 포함 여부 최종 확인
+  const hasSynopsisTag = userPrompt.includes('<episode_synopsis');
+  const hasReminderTag = userPrompt.includes('최종 확인');
+  console.log('[PROMPT-DEBUG] 시놉시스 태그 포함:', hasSynopsisTag);
+  console.log('[PROMPT-DEBUG] 최종 리마인더 포함:', hasReminderTag);
+
+  if (!hasSynopsisTag) {
+    console.error('[CRITICAL] ❌ 유저 프롬프트에 시놉시스가 포함되지 않음!');
+  }
 
   return { systemPrompt, userPrompt };
 }
