@@ -135,11 +135,73 @@ export async function POST(request: NextRequest) {
         console.log(userPrompt.substring(0, 500));
         console.log('[PROMPT-DEBUG] ===== END PROMPT DEBUG =====');
 
+        // ★★★ 작업 1: 프롬프트 덤프 (디버깅 후 삭제) ★★★
+        try {
+          const debugSupabase = await createServerSupabaseClient();
+          await debugSupabase.from('episode_logs').insert({
+            project_id: projectId,
+            episode_number: 9999, // 디버깅용 임시 번호
+            summary: JSON.stringify({
+              timestamp: new Date().toISOString(),
+              systemPromptLength: systemPrompt.length,
+              userPromptFirst1500: userPrompt.substring(0, 1500),
+              userPromptLast500: userPrompt.substring(userPrompt.length - 500),
+              hasSynopsisMarker: userPrompt.includes('synopsis') || userPrompt.includes('시놉시스') || userPrompt.includes('형장') || userPrompt.includes('████'),
+              synopsesInContext: context.episodeSynopses?.length || 0,
+              currentSynopsis: context.episodeSynopses?.find(s => s.isCurrent)?.synopsis?.substring(0, 300) || 'NONE',
+              currentSynopsisByEpNum: context.episodeSynopses?.find(s => s.episodeNumber === targetEpisodeNumber)?.synopsis?.substring(0, 300) || 'NONE',
+              targetEpisodeNumber,
+              hasEpisodeSynopsisTag,
+            }),
+            log_status: 'completed',
+          });
+          console.log('[DUMP] ✅ 프롬프트 덤프 저장 완료 (episode_number: 9999)');
+        } catch (dumpError) {
+          console.error('[DUMP] ❌ 프롬프트 덤프 실패:', dumpError);
+        }
+
+        // ★★★ 작업 3: 1화 하드코딩 테스트 (테스트 후 삭제) ★★★
+        let finalUserPrompt = userPrompt;
+        if (targetEpisodeNumber === 1) {
+          const hardcodedSynopsis = `
+████████████████████████████████████████████████████████████████████████████████
+██  🚨🚨🚨 [절대 명령 - CRITICAL OVERRIDE] 🚨🚨🚨                              ██
+██  아래 시놉시스를 100% 그대로 따라서 써라. 이것은 최우선 지시사항이다.        ██
+████████████████████████████████████████████████████████████████████████████████
+
+[씬1] 형장 — 새벽. 고려 조정의 대신 조위총이 무릎을 꿇고 있다.
+입은 갈라져 있고, 관복은 벗겨져 있다. 죄목 낭독: "역적 조위총, 참수에 처한다."
+그의 눈에는 분노가 아닌 자조. 나라가 이 꼴이 된 걸 막지 못한 자신이 한심하다.
+
+[씬2] 회상 — 조위총의 전성기. 붓으로 조정을 호령하던 시절.
+"칼잡이들은 짐승이다" 무신들을 경멸하던 기억.
+무신들이 들고일어나 문신들이 도살당함. 흑백이 뒤집어졌을 뿐.
+
+[씬3] 형장 — 처형 직전. 하늘을 올려다봄.
+중얼거림: "붓도 칼도 아니었다... 사람을 봤어야 했다..."
+망나니의 칼이 내려옴. 눈을 감지 않음. 가슴이 뜨겁게 타오름.
+
+[씬4] 어둠 — 완전한 무(無). 의식만 떠돈다.
+불꽃 하나가 꺼지지 않음. "다음에는 다르게..."
+의식이 끌려감. 아래로.
+
+★★★ 마지막 문장(필수): "차가운 것이 등을 눌렀다. 돌바닥이었다." ★★★
+
+████████████████████████████████████████████████████████████████████████████████
+██  위 시놉시스의 [씬1] 형장에서 시작하라. 감옥/폐가/정파는 금지.              ██
+████████████████████████████████████████████████████████████████████████████████
+`;
+
+          // userPrompt 최상단에 강제 삽입
+          finalUserPrompt = hardcodedSynopsis + '\n\n---\n\n' + userPrompt;
+          console.log('[HARDCODE-TEST] ★★★ 1화 하드코딩 시놉시스 주입됨 ★★★');
+        }
+
         // 5. Claude API 스트리밍 호출
         // ★★★ maxTokens: 8192 명시적 설정 (2,500자 잘림 방지) ★★★
         const result = await generateEpisodeStreaming({
           systemPrompt,
-          userPrompt,
+          userPrompt: finalUserPrompt, // ★ 하드코딩 테스트용 (원래는 userPrompt)
           maxTokens: 8192, // 절대 변경 금지 - 6,000자 분량 보장
           temperature: 0.8,
 

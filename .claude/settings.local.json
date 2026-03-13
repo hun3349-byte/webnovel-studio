@@ -47,7 +47,8 @@
       "Bash(git restore:*)",
       "Bash(npx tsx:*)",
       "Bash(npx dotenv:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(gh api:*)"
     ]
   }
 }

@@ -559,7 +559,7 @@ export default function StoryBiblePage() {
                   value={editing.episode_number}
                   onChange={e => setEditing(prev => ({ ...prev, episode_number: parseInt(e.target.value) || 1 }))}
                   disabled={!!editingId}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 />
               </div>
               <div>
@@ -569,7 +569,7 @@ export default function StoryBiblePage() {
                   value={editing.title}
                   onChange={e => setEditing(prev => ({ ...prev, title: e.target.value }))}
                   placeholder="예: 입궁의 날"
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 />
               </div>
             </div>
@@ -586,7 +586,7 @@ export default function StoryBiblePage() {
 
 ※ 추상적 요약('감옥에서 깨어나 심문받음')은 금지. 감정과 행동을 구체적으로.`}
                 rows={6}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-white"
               />
             </div>
 
@@ -598,7 +598,7 @@ export default function StoryBiblePage() {
                   value={editing.arc_name}
                   onChange={e => setEditing(prev => ({ ...prev, arc_name: e.target.value }))}
                   placeholder="예: 입궁편, 복수편"
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 />
               </div>
               <div>
@@ -606,7 +606,7 @@ export default function StoryBiblePage() {
                 <select
                   value={editing.arc_position}
                   onChange={e => setEditing(prev => ({ ...prev, arc_position: e.target.value }))}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 >
                   <option value="">선택...</option>
                   {ARC_POSITIONS.map(pos => (
@@ -624,7 +624,7 @@ export default function StoryBiblePage() {
                   value={editing.location}
                   onChange={e => setEditing(prev => ({ ...prev, location: e.target.value }))}
                   placeholder="예: 황궁 내전"
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 />
               </div>
               <div>
@@ -634,7 +634,7 @@ export default function StoryBiblePage() {
                   value={editing.time_context}
                   onChange={e => setEditing(prev => ({ ...prev, time_context: e.target.value }))}
                   placeholder="예: 입궁 3일차 오후"
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
                 />
               </div>
             </div>
@@ -646,7 +646,7 @@ export default function StoryBiblePage() {
                 value={editing.featured_characters}
                 onChange={e => setEditing(prev => ({ ...prev, featured_characters: e.target.value }))}
                 placeholder="예: 주인공, 황제, 내시"
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"
               />
             </div>
 
@@ -658,7 +658,7 @@ export default function StoryBiblePage() {
                   onChange={e => setEditing(prev => ({ ...prev, goals: e.target.value }))}
                   placeholder="이 에피소드에서 달성할 목표들..."
                   rows={3}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
                 />
               </div>
               <div>
@@ -668,7 +668,7 @@ export default function StoryBiblePage() {
                   onChange={e => setEditing(prev => ({ ...prev, key_events: e.target.value }))}
                   placeholder="주요 사건들..."
                   rows={3}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
                 />
               </div>
             </div>
@@ -681,7 +681,7 @@ export default function StoryBiblePage() {
                   onChange={e => setEditing(prev => ({ ...prev, foreshadowing: e.target.value }))}
                   placeholder="이 에피소드에서 깔 복선..."
                   rows={3}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
                 />
               </div>
               <div>
@@ -691,7 +691,7 @@ export default function StoryBiblePage() {
                   onChange={e => setEditing(prev => ({ ...prev, callbacks: e.target.value }))}
                   placeholder="이전 복선 중 회수할 것..."
                   rows={3}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
                 />
               </div>
             </div>
@@ -708,7 +708,7 @@ export default function StoryBiblePage() {
                     value={editing.emotion_curve}
                     onChange={e => setEditing(prev => ({ ...prev, emotion_curve: e.target.value }))}
                     placeholder="공포→혼란→분노(삼키며)→냉정한 관찰→위기감"
-                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white"
                   />
                 </div>
                 <div>
@@ -718,7 +718,7 @@ export default function StoryBiblePage() {
                     value={editing.ending_image}
                     onChange={e => setEditing(prev => ({ ...prev, ending_image: e.target.value }))}
                     placeholder="장로의 손가락이 고문 도구를 만지며 미소, 쇠사슬이 '찰깍' 풀린다"
-                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white"
                   />
                 </div>
               </div>
@@ -730,7 +730,7 @@ export default function StoryBiblePage() {
                   value={editing.forbidden}
                   onChange={e => setEditing(prev => ({ ...prev, forbidden: e.target.value }))}
                   placeholder="정체 노출 금지, '제3의 길' 같은 거대 선언 금지, 직접적 과거 설명 금지"
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white"
                 />
               </div>
 
@@ -743,7 +743,7 @@ export default function StoryBiblePage() {
 씬2: 혼란→분노 / 기억이 충돌하며 두통, 벽을 주먹으로 침
 씬3: 경계→도발 / 장로에게 능청스럽게 대응하다가 약점 포착`}
                   rows={4}
-                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                  className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
                 />
               </div>
             </div>
@@ -755,7 +755,7 @@ export default function StoryBiblePage() {
                 onChange={e => setEditing(prev => ({ ...prev, notes: e.target.value }))}
                 placeholder="추가 메모..."
                 rows={2}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm"
+                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 resize-none text-sm text-white"
               />
             </div>
 

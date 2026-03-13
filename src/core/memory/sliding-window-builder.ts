@@ -424,6 +424,11 @@ async function fetchEpisodeSynopses(
   projectId: string,
   targetEpisodeNumber: number
 ): Promise<{ data: unknown[] | null; error: unknown }> {
+  console.log('[SYNOPSIS-LOAD] ===== DB 쿼리 시작 =====');
+  console.log('[SYNOPSIS-LOAD] projectId:', projectId);
+  console.log('[SYNOPSIS-LOAD] targetEpisodeNumber:', targetEpisodeNumber);
+  console.log('[SYNOPSIS-LOAD] 범위: episode_number >=', targetEpisodeNumber - 3, 'AND <=', targetEpisodeNumber + 5);
+
   try {
     const result = await supabase
       .from('episode_synopses')
@@ -433,9 +438,24 @@ async function fetchEpisodeSynopses(
       .lte('episode_number', targetEpisodeNumber + 5)
       .order('episode_number', { ascending: true });
 
+    // ★★★ 상세 결과 로깅 ★★★
+    if (result.error) {
+      console.error('[SYNOPSIS-LOAD] ❌ DB 에러:', JSON.stringify(result.error));
+    } else {
+      console.log('[SYNOPSIS-LOAD] ✅ 쿼리 성공:', {
+        count: result.data?.length || 0,
+        episodes: result.data?.map((s: any) => ({
+          ep: s.episode_number,
+          synLen: s.synopsis?.length || 0,
+          synPreview: s.synopsis?.substring(0, 50),
+        })),
+      });
+    }
+
     return result;
-  } catch {
+  } catch (error) {
     // 테이블이 없거나 에러 발생 시 빈 배열 반환
+    console.error('[SYNOPSIS-LOAD] ❌ 예외 발생:', error);
     console.log('[SlidingWindowBuilder] episode_synopses 테이블 조회 실패 (테이블 없을 수 있음)');
     return { data: [], error: null };
   }
