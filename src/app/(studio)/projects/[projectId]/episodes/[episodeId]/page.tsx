@@ -403,14 +403,15 @@ export default function EpisodeEditorPage() {
         writingPreferences: [],
       } : null;
 
+      // ★★★ V9.3 수정: projectId를 전달하여 서버에서 시놉시스 포함 전체 컨텍스트 로드 ★★★
       const res = await fetch('/api/ai/test-generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId, // ★ 핵심: projectId 전달 → 서버에서 buildSlidingWindowContext 호출
           userInstruction: instruction,
           targetEpisodeNumber: episode?.episode_number || 1,
-          useTestContext: !context, // 컨텍스트가 없으면 테스트 컨텍스트 사용
-          context, // 실제 컨텍스트 전달
+          useTestContext: false, // 항상 실제 DB 사용
           useMock,
         }),
         signal: abortControllerRef.current.signal,

@@ -277,11 +277,20 @@ export async function POST(request: NextRequest) {
     let context;
 
     if (projectId) {
-      // projectId가 있으면 실제 DB에서 컨텍스트 빌드
+      // projectId가 있으면 실제 DB에서 컨텍스트 빌드 (시놉시스 포함)
+      console.log('[TEST-GENERATE] projectId로 컨텍스트 빌드 시작:', { projectId, targetEpisodeNumber });
       try {
         context = await buildSlidingWindowContext(projectId, targetEpisodeNumber, {
           windowSize: 3,
           includeWritingPreferences: true,
+          includeSynopses: true, // ★★★ 시놉시스 필수 로드 ★★★
+          includeTimelineEvents: true,
+        });
+        // ★★★ 시놉시스 로드 확인 ★★★
+        console.log('[TEST-GENERATE] 컨텍스트 빌드 완료:', {
+          hasEpisodeSynopses: !!context.episodeSynopses,
+          synopsesCount: context.episodeSynopses?.length || 0,
+          currentSynopsis: context.episodeSynopses?.find((s: { isCurrent?: boolean }) => s.isCurrent)?.synopsis?.substring(0, 100) || 'NONE',
         });
       } catch (dbError) {
         console.error('DB 컨텍스트 빌드 실패:', dbError);
