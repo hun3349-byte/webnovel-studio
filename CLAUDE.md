@@ -926,6 +926,16 @@ onHeartbeat: () => {
     - 에피소드 채택 시 `original_content` vs `content` 비교
     - 차이 감지 시 `triggerFeedbackLearning()` 자동 호출
 
+- [x] **🔧 V10.0.1 버그 수정** — Style DNA 페이지 크래시 해결
+  - **문제점**: `/projects/[id]/style-dna` 페이지에서 "Application error: a client-side exception has occurred" 발생
+  - **원인**: 프론트엔드 `MergedStyleDNA` 타입과 백엔드 응답 구조 불일치
+    - 프론트엔드: `mergedProseStyle`, `mergedAvoidPatterns` 등
+    - 백엔드 실제 응답: `proseStyle`, `avoidPatterns` 등 (`MergedStyleDNA extends StyleDNAElement`)
+  - **수정 내용** (`src/app/(studio)/projects/[projectId]/style-dna/page.tsx`)
+    - `MergedStyleDNA` 인터페이스 필드명 수정 (`mergedProseStyle` → `proseStyle`)
+    - 렌더링 코드에서 필드 참조 수정
+    - `avoidPatterns`, `favorPatterns` 접근 시 null 체크 추가
+
 ---
 
 ## 상업적 집필 규칙 (V9.8 - 문장 호흡 + 모바일 가독성 균형)
