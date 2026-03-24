@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callCompressLogApi } from '@/core/queue/log-queue-processor';
+import { triggerFeedbackLearning } from '@/core/style/feedback-learner';
 
 /**
  * 캐릭터 추출 API 호출 (백그라운드)
@@ -170,6 +171,20 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .catch((err) => {
         console.error('[Adopt] 캐릭터 추출 에러:', err);
       });
+
+    // 9. ★ V10.0: PD 피드백 자동 학습 (백그라운드)
+    // original_content(AI 원본)와 content(PD 수정본)를 비교하여 StyleDNA 학습
+    // Note: original_content는 00009_style_dna.sql 마이그레이션에서 추가된 컬럼
+    const episodeWithOriginal = episode as typeof episode & { original_content?: string };
+    if (episodeWithOriginal.original_content && episode.content !== episodeWithOriginal.original_content) {
+      console.log('[Adopt] PD 피드백 감지 - StyleDNA 학습 시작');
+      triggerFeedbackLearning(
+        projectId,
+        episode.episode_number,
+        episodeWithOriginal.original_content,
+        episode.content || ''
+      );
+    }
 
     return NextResponse.json({
       success: true,

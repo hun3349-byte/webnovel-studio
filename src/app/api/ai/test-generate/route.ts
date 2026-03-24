@@ -319,11 +319,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 프롬프트 조립
-    const { systemPrompt, userPrompt } = buildEpisodeGenerationPrompts(
+    // 프롬프트 조립 (V10.0: 동적 StyleDNA 로드)
+    const { systemPrompt, userPrompt } = await buildEpisodeGenerationPrompts(
       context,
       userInstruction,
-      targetEpisodeNumber
+      targetEpisodeNumber,
+      projectId  // V10.0: 동적 StyleDNA 로드용
     );
 
     // SSE 스트림 생성

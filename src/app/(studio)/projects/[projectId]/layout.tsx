@@ -71,6 +71,7 @@ export default function ProjectLayout({ children }: { children: ReactNode }) {
     { href: `/projects/${projectId}/story-bible`, label: '스토리 바이블', icon: '📚', shortLabel: '시놉' },
     { href: `/projects/${projectId}/timeline`, label: '타임라인', icon: '📊', shortLabel: '타임' },
     { href: `/projects/${projectId}/writing-memory`, label: 'Writing Memory', icon: '🧠', shortLabel: 'WM' },
+    { href: `/projects/${projectId}/style-dna`, label: '문체 DNA', icon: '🧬', shortLabel: 'DNA' },
     { href: `/projects/${projectId}/quality`, label: '퀄리티 검증', icon: '✅', shortLabel: '검증' },
     { href: `/projects/${projectId}/export`, label: '내보내기', icon: '📤', shortLabel: '출력' },
   ];

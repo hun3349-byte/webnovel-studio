@@ -1,5 +1,6 @@
 import type { SlidingWindowContext, TimelineEvent, ActiveCharacter } from '@/types/memory';
 import { buildWritingMemoryPrompt, logInjectedRules } from '@/lib/utils/writing-memory';
+import { buildDynamicStyleDNA, getDefaultStyleDNA } from '@/core/style/style-injector';
 
 // Writing Memory 시스템 규칙 로드 확인 (서버 시작 시 1회)
 if (typeof window === 'undefined') {
@@ -7,7 +8,7 @@ if (typeof window === 'undefined') {
 }
 
 // ============================================================================
-// 프롬프트 동적 주입기 v9.0
+// 프롬프트 동적 주입기 v10.0 (Style Evolution Engine 통합)
 // ============================================================================
 // V9.0 아키텍처 개편: "규칙 엔진(Rule Engine)에서 작가실(Writer's Room)로"
 //
@@ -60,20 +61,80 @@ const ABSOLUTE_RULES = `
 
 // ============================================================================
 // Layer 1: 문체 DNA (STYLE DNA)
+// V10.0: 동적 StyleDNA로 대체됨 - 아래는 Fallback용 기본 DNA
+// 프로젝트에 StyleDNA가 없을 때만 사용됨
 // ============================================================================
-const STYLE_DNA = `
+const DEFAULT_STYLE_DNA_FALLBACK = `
 <style_dna>
 [서술 원칙]
 - Show, Don't Tell. 감정을 직접 쓰지 말고 '신체 반응'으로 보여줘라.
-- 대사 비율은 전체의 25% 이하. 대사(" ") 앞뒤로는 반드시 빈 줄 삽입. 한 문단은 최대 2~3문장.
+- 대사 비율은 전체의 25% 이하.
 - 모든 씬에 '갈등(Conflict)'이나 '선택의 기로'가 있어야 한다. 밋밋한 이동이나 설명 씬 금지.
+
+[★★★ 문장 호흡 — 스타카토 금지, 복문 연결 필수 ★★★]
+같은 흐름의 동작/감각은 접속사(~하자, ~하며, ~하고, ~자마자)로 연결하여 호흡을 길게 가져가라.
+짧은 문장을 나열하는 '스타카토 문체'는 분량 늘리기 꼼수로 간주하여 금지한다.
+
+× (스타카토 — 금지):
+노인을 바닥에 눕혔다. 팔에서 힘이 빠졌다. 털썩 소리가 났다. 노인의 머리가 바닥에 부딪쳤다.
+
+○ (복문 연결 — 권장):
+노인을 바닥에 눕히자 팔에서 힘이 빠지며 털썩, 노인의 머리가 바닥에 부딪치는 둔탁한 소리가 울렸다.
+
+× (스타카토 — 금지):
+검을 뽑았다. 달려들었다. 베었다. 피가 튀었다.
+
+○ (복문 연결 — 권장):
+검을 뽑아 달려들며 베어내자 붉은 피가 허공에 선을 그었다.
+
+규칙:
+- 연속된 동작은 하나의 문장으로 묶어라 (2~3개 동작을 접속사로 연결)
+- 짧은 문장(1~3어절)이 3개 이상 연속되면 안 된다
+- 문장 하나에 감각(시각/청각/촉각) 묘사를 섞어 밀도를 높여라
+
+[★★★ 문단 구분 — 흐름이 바뀔 때만 빈 줄 ★★★]
+문단 사이 빈 줄은 '흐름의 전환'을 표시할 때만 사용한다. 무분별하게 넣지 마라.
+
+빈 줄을 넣는 경우:
+- 시선/초점이 바뀔 때 (인물A → 인물B)
+- 시간이 경과할 때 (잠시 후, 얼마 뒤)
+- 장소가 바뀔 때
+- 대사 앞뒤 (대사는 시각적으로 독립)
+- 분위기/템포가 급변할 때
+
+빈 줄을 넣지 않는 경우:
+- 같은 인물의 연속 동작
+- 같은 장면 내 묘사 연속
+- 원인→결과가 바로 이어질 때
+
+[문단 구성 예시]
+
+× (과도한 끊어쓰기 — 시처럼 보임):
+노인을 바닥에 눕혔다.
+
+팔에서 힘이 빠졌다.
+
+털썩 소리가 났다.
+
+○ (같은 흐름은 한 문단):
+노인을 바닥에 눕히자 팔에서 힘이 빠지며 털썩, 둔탁한 소리와 함께 노인의 머리가 바닥에 부딪쳤다. 축 늘어진 몸에서 미세한 호흡만이 느껴졌다.
+
+[대사 포매팅]
+대사(" ")는 앞뒤로 빈 줄을 넣어 시각적으로 독립시켜라.
+
+○ (대사 독립):
+노인이 고개를 들었다. 희미한 눈빛이 소년을 향했다.
+
+"누구냐."
+
+차갑고 낮은 목소리였다. 소년은 대답 대신 한 발 다가섰다.
 
 [Tell 금지 — 나쁜 예 vs 좋은 예]
 × "거짓말이었다. 그는 그것을 직감적으로 알았다."
 ○ 그의 미소가 눈가에 닿지 않았다. 손가락 끝이 탁자를 두드리는 박자가 미묘하게 불규칙했다.
 
 × "흥미로운 일이었다."
-○ 입꼬리가 올라갔다. 이건 뭐지. 손을 쥐었다 폈다. 남의 손처럼 낯설면서도 묘하게 익숙했다.
+○ 입꼬리가 올라갔다. 이건 뭐지. 손을 쥐었다 폈다.
 
 × "그의 직감이 경고했다."
 ○ 뒷목이 서늘했다. 온화한 미소 뒤에서 무언가가 꿈틀거렸다.
@@ -401,12 +462,33 @@ export function buildPreviousSummarySection(context: SlidingWindowContext): stri
 // ============================================================================
 // V9.0 시스템 프롬프트 빌더
 // ============================================================================
-export function buildSystemPromptV9(targetEpisodeNumber: number): string {
+// ============================================================================
+// V10.0 시스템 프롬프트 빌더 (동적 StyleDNA 지원)
+// ============================================================================
+export async function buildSystemPromptV9(
+  targetEpisodeNumber: number,
+  projectId?: string
+): Promise<string> {
   const writingMemoryPrompt = buildWritingMemoryPrompt();
+
+  // 동적 StyleDNA 로드 (projectId가 있으면)
+  let styleDNA: string;
+  if (projectId) {
+    try {
+      styleDNA = await buildDynamicStyleDNA(projectId);
+      console.log('[PromptInjector] 동적 StyleDNA 로드 완료');
+    } catch (error) {
+      console.warn('[PromptInjector] 동적 StyleDNA 로드 실패, 기본 DNA 사용:', error);
+      styleDNA = getDefaultStyleDNA();
+    }
+  } else {
+    // projectId가 없으면 기본 DNA 사용
+    styleDNA = getDefaultStyleDNA();
+  }
 
   return [
     ABSOLUTE_RULES,
-    STYLE_DNA,
+    styleDNA,
     getContinuityRule(targetEpisodeNumber),
     writingMemoryPrompt,
   ].filter(Boolean).join('\n');
@@ -523,11 +605,15 @@ ${userInstruction}
 // ============================================================================
 // V9.0.3 에피소드 생성 프롬프트 조립 (메인 함수)
 // ============================================================================
-export function buildEpisodeGenerationPrompts(
+// ============================================================================
+// V10.0 에피소드 생성 프롬프트 조립 (메인 함수) - 동적 StyleDNA 지원
+// ============================================================================
+export async function buildEpisodeGenerationPrompts(
   context: SlidingWindowContext,
   userInstruction: string,
-  targetEpisodeNumber: number
-): { systemPrompt: string; userPrompt: string } {
+  targetEpisodeNumber: number,
+  projectId?: string  // V10.0: 동적 StyleDNA 로드용
+): Promise<{ systemPrompt: string; userPrompt: string }> {
   // ★★★ V9.0.3: 시놉시스 디버깅 강화 ★★★
   const synopsesInfo = context.episodeSynopses || [];
   const currentByFlag = synopsesInfo.find(s => s.isCurrent);
@@ -561,9 +647,14 @@ export function buildEpisodeGenerationPrompts(
     characterCount: context.activeCharacters?.length || 0,
     hasPreviousEnding: !!context.previousEpisodeEnding,
     previousEndingLength: context.previousEpisodeEnding?.length || 0,
+    projectId: projectId || context.worldBible?.project_id || 'unknown',
   });
 
-  const systemPrompt = buildSystemPromptV9(targetEpisodeNumber);
+  // V10.0: projectId가 없으면 context에서 추출 시도
+  const effectiveProjectId = projectId || context.worldBible?.project_id;
+
+  // V10.0: 동적 StyleDNA 로드
+  const systemPrompt = await buildSystemPromptV9(targetEpisodeNumber, effectiveProjectId);
   const userPrompt = buildUserPromptV9(context, userInstruction, targetEpisodeNumber);
 
   // 최종 검증 로그
@@ -765,13 +856,13 @@ export function serializeContextToPrompt(context: SlidingWindowContext): string 
 }
 
 /** @deprecated */
-export function buildEpisodeGenerationPrompt(
+export async function buildEpisodeGenerationPrompt(
   context: SlidingWindowContext,
   userInstruction: string,
   targetEpisodeNumber: number
-): string {
+): Promise<string> {
   console.warn('[DEPRECATED] buildEpisodeGenerationPrompt() - V9.0에서는 buildEpisodeGenerationPrompts() 사용');
-  const { userPrompt } = buildEpisodeGenerationPrompts(context, userInstruction, targetEpisodeNumber);
+  const { userPrompt } = await buildEpisodeGenerationPrompts(context, userInstruction, targetEpisodeNumber);
   return userPrompt;
 }
 

@@ -105,11 +105,12 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // 4. 프롬프트 조립
-        const { systemPrompt, userPrompt } = buildEpisodeGenerationPrompts(
+        // 4. 프롬프트 조립 (V10.0: 동적 StyleDNA 로드)
+        const { systemPrompt, userPrompt } = await buildEpisodeGenerationPrompts(
           context,
           userInstruction,
-          targetEpisodeNumber
+          targetEpisodeNumber,
+          projectId  // V10.0: 동적 StyleDNA 로드용
         );
 
         // ★★★ V9.0.3: 프롬프트 내 시놉시스 포함 검증 ★★★
@@ -200,6 +201,7 @@ export async function POST(request: NextRequest) {
               project_id: projectId,
               episode_number: targetEpisodeNumber,
               content: finalContent,  // ★ Hidden CoT 제거된 버전 저장
+              original_content: finalContent,  // ★ V10.0: AI 원본 저장 (피드백 학습용)
               char_count: charCount,
               status: 'draft',
             })
