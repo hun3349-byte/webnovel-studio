@@ -29,15 +29,15 @@ interface StyleDNA {
 interface MergedStyleDNA {
   id: string;
   projectId: string;
-  mergedProseStyle: string | null;
-  mergedRhythmPattern: string | null;
-  mergedDialogueStyle: string | null;
-  mergedEmotionExpression: string | null;
-  mergedSceneTransition: string | null;
-  mergedActionDescription: string | null;
-  mergedBestSamples: Array<{ category: string; badExample?: string; goodExample: string; explanation?: string }>;
-  mergedAvoidPatterns: string[];
-  mergedFavorPatterns: string[];
+  proseStyle: string | null;
+  rhythmPattern: string | null;
+  dialogueStyle: string | null;
+  emotionExpression: string | null;
+  sceneTransition: string | null;
+  actionDescription: string | null;
+  bestSamples: Array<{ category: string; badExample?: string; goodExample: string; explanation?: string }>;
+  avoidPatterns: string[];
+  favorPatterns: string[];
   sourceCount: number;
   referenceCount: number;
   pdFeedbackCount: number;
@@ -298,23 +298,23 @@ export default function StyleDNAPage() {
 
             {/* DNA Preview */}
             <div className="grid grid-cols-2 gap-4 text-sm">
-              {mergedDNA.mergedProseStyle && (
+              {mergedDNA.proseStyle && (
                 <div className="bg-gray-800/30 rounded-lg p-3">
                   <div className="text-xs text-gray-500 mb-1">산문 스타일</div>
-                  <div className="text-gray-300 line-clamp-2">{mergedDNA.mergedProseStyle}</div>
+                  <div className="text-gray-300 line-clamp-2">{mergedDNA.proseStyle}</div>
                 </div>
               )}
-              {mergedDNA.mergedDialogueStyle && (
+              {mergedDNA.dialogueStyle && (
                 <div className="bg-gray-800/30 rounded-lg p-3">
                   <div className="text-xs text-gray-500 mb-1">대사 스타일</div>
-                  <div className="text-gray-300 line-clamp-2">{mergedDNA.mergedDialogueStyle}</div>
+                  <div className="text-gray-300 line-clamp-2">{mergedDNA.dialogueStyle}</div>
                 </div>
               )}
-              {mergedDNA.mergedAvoidPatterns.length > 0 && (
+              {mergedDNA.avoidPatterns && mergedDNA.avoidPatterns.length > 0 && (
                 <div className="bg-gray-800/30 rounded-lg p-3">
                   <div className="text-xs text-gray-500 mb-1">회피 패턴</div>
                   <div className="flex flex-wrap gap-1">
-                    {mergedDNA.mergedAvoidPatterns.slice(0, 5).map((pattern, i) => (
+                    {mergedDNA.avoidPatterns.slice(0, 5).map((pattern, i) => (
                       <span key={i} className="px-2 py-0.5 bg-red-500/20 text-red-400 rounded text-xs">
                         {pattern}
                       </span>
@@ -322,11 +322,11 @@ export default function StyleDNAPage() {
                   </div>
                 </div>
               )}
-              {mergedDNA.mergedFavorPatterns.length > 0 && (
+              {mergedDNA.favorPatterns && mergedDNA.favorPatterns.length > 0 && (
                 <div className="bg-gray-800/30 rounded-lg p-3">
                   <div className="text-xs text-gray-500 mb-1">선호 패턴</div>
                   <div className="flex flex-wrap gap-1">
-                    {mergedDNA.mergedFavorPatterns.slice(0, 5).map((pattern, i) => (
+                    {mergedDNA.favorPatterns.slice(0, 5).map((pattern, i) => (
                       <span key={i} className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs">
                         {pattern}
                       </span>
