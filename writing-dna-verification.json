@@ -1,0 +1,30 @@
+{
+  "projectId": "52a08587-68f8-4452-b238-e731663cdfce",
+  "requestedMode": "claude_legacy",
+  "metrics": {
+    "baseline": {
+      "charCount": 3994,
+      "paragraphCount": 36,
+      "consecutiveShortSentenceUses": 14,
+      "directEmotionCount": 1,
+      "writingDnaViolations": 0
+    },
+    "regenerated": {
+      "charCount": 2879,
+      "paragraphCount": 42,
+      "consecutiveShortSentenceUses": 13,
+      "directEmotionCount": 0,
+      "writingDnaViolations": 0
+    }
+  },
+  "delta": {
+    "paragraphCount": 6,
+    "consecutiveShortSentenceUses": -1,
+    "directEmotionCount": -1,
+    "writingDnaViolations": 0
+  },
+  "preview": {
+    "baselineOpening": "[Scene Plan]\n\n씬 1:\n- 장소/시간: 산골 마을 뒷산 숲, 새벽 무렵\n- 핵심 갈등: 굶주림과 생존 본능 vs 위험한 수렵\n- 감정: 절망적 허기 → 조심스러운 긴장감\n- 주인공의 행동/선택: 덫을 놓고 사냥감을 기다리며 숨어있기로 결정\n- 독자의 감정: 주인공의 절박한 상황에 몰입\n\n씬 2:\n- 장소/시간: 같은 숲, 해가 뜨기 직전\n- 핵심 갈등: 예상치 못한 인간의 기척 vs 숨어야 하는 상황\n- 감정: 긴장감 → 공포와 경계심\n- 주인공의 행동/선택: 나무 위로 올라가 상황을 살피기로 선택\n- 독자의 감정: 긴장감과 호기심\n\n씬 3:\n- 장소/시간: 나무 위에서 아래를 내려다보는 상황\n- 핵심 갈등: 호기심 vs 발각될 위험\n- 감정: 경계심 → 충격과 두려움\n- 주인공의 행동/선택: 계",
+    "regeneratedOpening": "[Scene Plan]\n\n씬 1:\n- 장소/시간: 산골 마을 외곽의 버려진 토굴, 새벽녘\n- 핵심 갈등: 굶주림과 추위 속에서 생존하려는 소년의 절박함\n- 감정: 절망적 굶주림 → 미약한 희망\n- 주인공의 행동/선택: 토굴을 나와 먹을 것을 찾기로 결심\n- 독자의 감정: 주인공의 처참한 상황에 대한 연민과 안타까움\n\n씬 2:\n- 장소/시간: 마을 뒷골목, 이른 아침\n- 핵심 갈등: 음식을 훔치려다 발각될 위기\n- 감정: 간절한 욕망 → 공포와 절망\n- 주인공의 행동/선택: 위험을 무릅쓰고 빵을 훔치려 시도\n- 독자의 감정: 긴장감과 주인공에 대한 걱정\n\n씬 3:\n- 장소/시간: 마을 광장 근처 골목, 아침\n- 핵심 갈등: 마을 아이들의 괴롭힘과 모욕\n- 감정: 굴욕감 → 분노와 무력감\n- 주인공의 행동/선택"
+  }
+}

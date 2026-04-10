@@ -11,6 +11,8 @@ export async function GET(
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || 'open';
     const limit = parseInt(searchParams.get('limit') || '10');
+    const episodeNumberRaw = searchParams.get('episodeNumber');
+    const episodeNumber = episodeNumberRaw ? Number(episodeNumberRaw) : null;
 
     const supabase = await createServerSupabaseClient();
 
@@ -22,14 +24,22 @@ export async function GET(
     let query = supabase
       .from('story_hooks')
       .select('*')
-      .eq('project_id', projectId)
-      .order('importance', { ascending: false })
-      .order('created_in_episode_number', { ascending: true })
-      .limit(limit);
+      .eq('project_id', projectId);
 
     if (status !== 'all') {
       query = query.eq('status', status);
     }
+
+    // Current-episode authoring should not be distracted by future hooks.
+    if (Number.isFinite(episodeNumber) && episodeNumber !== null) {
+      query = query.lte('created_in_episode_number', episodeNumber);
+    }
+
+    // Fetch enough rows first, then compute episode-aware ranking in memory.
+    query = query
+      .order('created_in_episode_number', { ascending: false })
+      .order('importance', { ascending: false })
+      .limit(Math.max(limit * 3, 50));
 
     const { data: hooks, error } = await query;
 
@@ -38,7 +48,25 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ hooks: hooks || [] });
+    const rankHook = (hook: {
+      importance: number | null;
+      created_in_episode_number: number;
+    }) => {
+      const importance = hook.importance ?? 5;
+      const distance =
+        Number.isFinite(episodeNumber) && episodeNumber !== null
+          ? Math.max(0, episodeNumber - hook.created_in_episode_number)
+          : 0;
+
+      return importance * 100 - distance * 5 + hook.created_in_episode_number * 0.01;
+    };
+
+    const rankedHooks = (hooks || [])
+      .slice()
+      .sort((a, b) => rankHook(b) - rankHook(a))
+      .slice(0, limit);
+
+    return NextResponse.json({ hooks: rankedHooks });
   } catch (error) {
     console.error('Hooks API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -72,6 +100,7 @@ export async function POST(
         related_character_ids: body.related_character_ids || [],
         created_in_episode_number: body.created_in_episode_number,
         importance: body.importance || 5,
+        status: body.status || 'open',
       })
       .select()
       .single();

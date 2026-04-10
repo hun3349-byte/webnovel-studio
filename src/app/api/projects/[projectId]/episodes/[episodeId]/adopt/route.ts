@@ -2,66 +2,32 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { callCompressLogApi } from '@/core/queue/log-queue-processor';
 import { triggerFeedbackLearning } from '@/core/style/feedback-learner';
-
-/**
- * 캐릭터 추출 API 호출 (백그라운드)
- */
-async function callCharacterExtractionApi(
-  episodeId: string,
-  projectId: string
-): Promise<{ success: boolean; data?: unknown; error?: string }> {
-  try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const response = await fetch(`${baseUrl}/api/ai/extract-characters`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ episodeId, projectId, useMock: false }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      return { success: false, error: errorData.error || `HTTP ${response.status}` };
-    }
-
-    const data = await response.json();
-    return { success: true, data: data.result };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
+import { normalizeSerialParagraphs } from '@/lib/editor/serial-normalizer';
+import { syncCharacterCatalogFromEpisode } from '@/core/memory/character-catalog-worker';
 
 interface RouteParams {
   params: Promise<{ projectId: string; episodeId: string }>;
 }
 
-/**
- * POST /api/projects/[projectId]/episodes/[episodeId]/adopt
- *
- * 에피소드 [채택] - 가장 중요한 엔드포인트
- * 1. 에피소드 상태를 'published'로 변경
- * 2. 로그 생성 큐에 등록 (백그라운드에서 로그 압축 수행)
- * 3. 다음 화 집필을 위한 Memory Pipeline 시작
- */
-export async function POST(request: NextRequest, { params }: RouteParams) {
-  console.log('[Adopt API v2] Request received'); // 버전 표시로 캐시 갱신 확인
-
+export async function POST(_request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId, episodeId } = await params;
-    console.log('[Adopt API v2] Params:', { projectId, episodeId });
+    const body = await _request.json().catch(() => ({}));
+    const inputTitle = typeof body?.title === 'string' ? body.title : undefined;
+    const inputContent = typeof body?.content === 'string' ? body.content : undefined;
+    const inputOriginalContent =
+      typeof body?.originalContent === 'string' ? body.originalContent : undefined;
 
     const supabase = await createServerSupabaseClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
-      console.log('[Adopt API v2] Auth error:', authError);
-      return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
+      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
     }
-    console.log('[Adopt API v2] User authenticated:', user.id);
 
-    // 1. 에피소드 조회
     const { data: episode, error: fetchError } = await supabase
       .from('episodes')
       .select('*')
@@ -70,134 +36,141 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
       .single();
 
     if (fetchError || !episode) {
-      return NextResponse.json({ error: 'Episode not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Episode not found.' }, { status: 404 });
     }
 
-    // 2. 최소 안전 검증 (완전히 빈 콘텐츠만 차단)
-    const charCount = episode.content?.length || 0;
+    const content = normalizeSerialParagraphs(
+      inputContent !== undefined ? inputContent : episode.content || ''
+    );
+    const original = normalizeSerialParagraphs(
+      inputOriginalContent !== undefined
+        ? inputOriginalContent
+        : (episode as { original_content?: string }).original_content || ''
+    );
+    const charCount = content.length;
     if (charCount === 0) {
-      return NextResponse.json(
-        { error: '에피소드 내용이 비어있습니다.' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Cannot adopt empty content.' }, { status: 400 });
     }
-    // 분량 제한 없음 - 몇 자든 채택 허용
-    console.log(`[Adopt] 에피소드 채택: ${charCount}자`);
 
-    // 3. 에피소드 상태 업데이트 (published)
     const { error: updateError } = await supabase
       .from('episodes')
       .update({
+        title: inputTitle ?? episode.title,
+        content,
+        original_content: original || content,
+        char_count: charCount,
         status: 'published',
         published_at: new Date().toISOString(),
-        log_status: 'pending', // 로그 생성 대기
+        log_status: 'pending',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', episodeId);
+      .eq('id', episodeId)
+      .eq('project_id', projectId);
 
     if (updateError) throw updateError;
 
-    // 4. 로그 생성 큐에 등록
-    const { error: queueError } = await supabase
-      .from('episode_log_queue')
-      .insert({
-        episode_id: episodeId,
-        project_id: projectId,
-        queue_status: 'pending',
-        retry_count: 0,
-        max_retries: 3,
-        scheduled_at: new Date().toISOString(),
-      });
+    const { error: queueError } = await supabase.from('episode_log_queue').insert({
+      episode_id: episodeId,
+      project_id: projectId,
+      queue_status: 'pending',
+      retry_count: 0,
+      max_retries: 3,
+      scheduled_at: new Date().toISOString(),
+    });
 
     if (queueError) {
-      console.error('Queue registration error:', queueError);
-      // 큐 등록 실패해도 채택은 성공으로 처리 (fallback 로그 사용)
+      console.warn('[Adopt] queue registration failed:', queueError);
     }
 
-    // 5. Fallback 로그 즉시 생성 (AI 로그 생성 실패 대비)
-    // 마지막 500자 추출
-    const last500Chars = episode.content?.slice(-500) || '';
-
-    // 간단한 요약 생성 (실제로는 AI가 하지만 fallback용)
-    const fallbackSummary = generateFallbackSummary(episode.content || '', episode.episode_number);
-
-    const { error: logError } = await supabase
+    const fallbackSummary = buildFallbackSummary(content, episode.episode_number);
+    const { error: fallbackError } = await supabase
       .from('episode_logs')
-      .upsert({
-        episode_id: episodeId,
-        project_id: projectId,
-        episode_number: episode.episode_number,
-        summary: fallbackSummary,
-        last_500_chars: last500Chars,
-        is_fallback: true, // AI 로그로 대체될 때까지 fallback 표시
-        raw_ai_response: null,
-      }, {
-        onConflict: 'episode_id',
-      });
+      .upsert(
+        {
+          episode_id: episodeId,
+          project_id: projectId,
+          episode_number: episode.episode_number,
+          summary: fallbackSummary,
+          last_500_chars: content.slice(-500),
+          is_fallback: true,
+          raw_ai_response: null,
+        },
+        { onConflict: 'episode_id' }
+      );
 
-    if (logError) {
-      console.error('Fallback log creation error:', logError);
+    if (fallbackError) {
+      console.warn('[Adopt] fallback log upsert failed:', fallbackError);
     }
 
-    // 6. 에피소드 로그 상태 업데이트
-    await supabase
-      .from('episodes')
-      .update({ log_status: 'processing' })
-      .eq('id', episodeId);
+    await supabase.from('episodes').update({ log_status: 'processing' }).eq('id', episodeId);
 
-    // 7. 즉시 AI 로그 압축 시도 (백그라운드)
-    // 성공하면 fallback 로그가 AI 로그로 대체됨
-    // 실패해도 fallback 로그가 있으므로 안전
-    callCompressLogApi(episodeId, projectId, false)
-      .then((result) => {
-        if (!result.success) {
-          console.warn('Initial log compression failed, will retry via queue:', result.error);
-        }
-      })
-      .catch((err) => {
-        console.error('Log compression error:', err);
-      });
+    void callCompressLogApi(episodeId, projectId, false).catch((error) => {
+      console.warn('[Adopt] compress-log failed:', error);
+    });
 
-    // 8. ★ 캐릭터 자동 추출 (백그라운드)
-    // 새로 등장한 인물을 자동으로 감지하여 DB에 저장
-    callCharacterExtractionApi(episodeId, projectId)
-      .then((result) => {
-        if (result.success) {
-          console.log('[Adopt] 캐릭터 추출 완료:', result.data);
-        } else {
-          console.warn('[Adopt] 캐릭터 추출 실패:', result.error);
-        }
-      })
-      .catch((err) => {
-        console.error('[Adopt] 캐릭터 추출 에러:', err);
-      });
-
-    // 9. ★ V10.0: PD 피드백 자동 학습 (백그라운드)
-    // original_content(AI 원본)와 content(PD 수정본)를 비교하여 StyleDNA 학습
-    // Note: original_content는 00009_style_dna.sql 마이그레이션에서 추가된 컬럼
-    const episodeWithOriginal = episode as typeof episode & { original_content?: string };
-    if (episodeWithOriginal.original_content && episode.content !== episodeWithOriginal.original_content) {
-      console.log('[Adopt] PD 피드백 감지 - StyleDNA 학습 시작');
-      triggerFeedbackLearning(
+    try {
+      const characterSyncResult = await syncCharacterCatalogFromEpisode({
         projectId,
-        episode.episode_number,
-        episodeWithOriginal.original_content,
-        episode.content || ''
-      );
+        episodeId,
+        episodeNumber: episode.episode_number,
+        content,
+        supabaseClient: supabase,
+      });
+      console.log('[Adopt] character catalog sync:', characterSyncResult);
+    } catch (error) {
+      console.warn('[Adopt] character catalog sync failed:', error);
+    }
+
+    try {
+      await saveTransitionContractAndSnapshots({
+        supabase,
+        projectId,
+        episodeId,
+        episodeNumber: episode.episode_number,
+        content,
+      });
+    } catch (error) {
+      console.warn('[Adopt] transition contract/snapshot save failed:', error);
+    }
+
+    try {
+      await applyStoryHookProgression({
+        supabase,
+        projectId,
+        episodeNumber: episode.episode_number,
+        content,
+      });
+    } catch (error) {
+      console.warn('[Adopt] hook progression failed:', error);
+    }
+
+    if (original && original !== content) {
+      triggerFeedbackLearning(projectId, episode.episode_number, original, content);
     }
 
     return NextResponse.json({
       success: true,
-      message: '에피소드가 채택되었습니다. AI 로그 생성이 진행 중입니다.',
+      message:
+        charCount < 4000
+          ? 'Episode adopted below recommended length (4,000). Log compression, character sync, and learning tasks started.'
+          : 'Episode adopted. Log compression, character sync, and learning tasks started.',
       episode: {
         id: episodeId,
         episode_number: episode.episode_number,
         status: 'published',
         log_status: 'processing',
       },
+      lengthAdvisory:
+        charCount < 4000
+          ? {
+              recommendedMin: 4000,
+              current: charCount,
+              warning: 'Adopted under recommended minimum length.',
+            }
+          : null,
     });
   } catch (error) {
-    console.error('Episode adopt error:', error);
+    console.error('[Adopt] error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to adopt episode' },
       { status: 500 }
@@ -205,28 +178,158 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-/**
- * Fallback 요약 생성 (AI 실패 시 사용)
- */
-function generateFallbackSummary(content: string, episodeNumber: number): string {
-  // 간단한 규칙 기반 요약 (AI 대체용)
-  const lines = content.split('\n').filter(line => line.trim());
-  const dialogues = lines.filter(line => line.includes('"')).slice(0, 3);
+function buildFallbackSummary(content: string, episodeNumber: number) {
+  const lines = content.split('\n').map((line) => line.trim()).filter(Boolean);
+  const preview = lines.slice(0, 3).join(' / ');
+  return `[${episodeNumber}화|fallback]\n길이: ${content.length}\n요약: ${preview}\n엔딩: ${content.slice(-120)}`;
+}
 
-  let summary = `[${episodeNumber}화 임시 요약]\n`;
-  summary += `분량: ${content.length}자\n`;
+function splitParagraphs(content: string): string[] {
+  return content
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
 
-  if (dialogues.length > 0) {
-    summary += `주요 대사:\n`;
-    dialogues.forEach(d => {
-      const trimmed = d.length > 50 ? d.substring(0, 50) + '...' : d;
-      summary += `- ${trimmed}\n`;
-    });
+function extractTransitionAnchors(content: string): {
+  anchor1: string;
+  anchor2: string;
+  anchor3: string;
+  openingGuardrail: string;
+} {
+  const paragraphs = splitParagraphs(content);
+  const last = paragraphs[paragraphs.length - 1] || '';
+  const prev = paragraphs[paragraphs.length - 2] || '';
+  const prev2 = paragraphs[paragraphs.length - 3] || '';
+
+  return {
+    anchor1: prev2.slice(0, 260).trim(),
+    anchor2: prev.slice(0, 260).trim(),
+    anchor3: last.slice(0, 260).trim(),
+    openingGuardrail:
+      '다음 화 오프닝 400자 안에서 직전 화 마지막 장면의 장소/감정/직전 행동 결과를 반드시 이어서 시작한다.',
+  };
+}
+
+async function saveTransitionContractAndSnapshots(params: {
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>;
+  projectId: string;
+  episodeId: string;
+  episodeNumber: number;
+  content: string;
+}) {
+  const { supabase, projectId, episodeId, episodeNumber, content } = params;
+  const db = supabase as any;
+
+  const anchors = extractTransitionAnchors(content);
+  await db
+    .from('episode_transition_contracts')
+    .upsert(
+      {
+        project_id: projectId,
+        source_episode_id: episodeId,
+        source_episode_number: episodeNumber,
+        target_episode_number: episodeNumber + 1,
+        anchor_1: anchors.anchor1,
+        anchor_2: anchors.anchor2,
+        anchor_3: anchors.anchor3,
+        opening_guardrail: anchors.openingGuardrail,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'project_id,source_episode_number' }
+    );
+
+  const { data: activeCharacters } = await supabase
+    .from('characters')
+    .select('name, role, current_location, emotional_state, injuries, possessed_items')
+    .eq('project_id', projectId)
+    .eq('is_alive', true);
+
+  const snapshots = (activeCharacters || []).map((char) => ({
+    name: char.name,
+    role: char.role,
+    location: char.current_location,
+    emotionalState: char.emotional_state,
+    injuries: char.injuries || [],
+    possessedItems: char.possessed_items || [],
+  }));
+
+  await db
+    .from('episode_character_snapshots')
+    .upsert(
+      {
+        project_id: projectId,
+        episode_id: episodeId,
+        episode_number: episodeNumber,
+        snapshots,
+      },
+      { onConflict: 'project_id,episode_number' }
+    );
+}
+
+function normalizeForMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^0-9a-z\uac00-\ud7a3\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function textIncludesHook(
+  content: string,
+  hook: { summary: string; keywords?: string[] | null }
+) {
+  const normalizedText = normalizeForMatch(content);
+  const summaryTokens = normalizeForMatch(hook.summary)
+    .split(' ')
+    .filter((token) => token.length >= 2)
+    .slice(0, 6);
+  const keywordTokens = (hook.keywords || [])
+    .map((keyword) => normalizeForMatch(String(keyword)))
+    .filter(Boolean);
+
+  const summaryHit = summaryTokens.filter((token) => normalizedText.includes(token)).length;
+  if (summaryHit >= Math.max(2, Math.floor(summaryTokens.length * 0.5))) return true;
+  return keywordTokens.some((token) => token.length >= 2 && normalizedText.includes(token));
+}
+
+async function applyStoryHookProgression(params: {
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>;
+  projectId: string;
+  episodeNumber: number;
+  content: string;
+}) {
+  const { supabase, projectId, episodeNumber, content } = params;
+  const { data: hooks } = await supabase
+    .from('story_hooks')
+    .select('id, status, summary, keywords')
+    .eq('project_id', projectId)
+    .in('status', ['open', 'hinted', 'escalated', 'partially_resolved'])
+    .order('importance', { ascending: false })
+    .limit(20);
+
+  for (const hook of hooks || []) {
+    if (!textIncludesHook(content, hook)) continue;
+
+    const nextStatus =
+      hook.status === 'open'
+        ? 'hinted'
+        : hook.status === 'hinted'
+          ? 'escalated'
+          : 'resolved';
+
+    const patch: Record<string, unknown> = {
+      status: nextStatus,
+      updated_at: new Date().toISOString(),
+    };
+    if (nextStatus === 'resolved') {
+      patch.resolved_in_episode_number = episodeNumber;
+    }
+
+    await supabase
+      .from('story_hooks')
+      .update(patch)
+      .eq('id', hook.id)
+      .eq('project_id', projectId);
   }
-
-  // 첫 100자와 마지막 100자로 시작/끝 힌트
-  summary += `\n[시작] ${content.substring(0, 100)}...\n`;
-  summary += `[끝] ...${content.substring(content.length - 100)}`;
-
-  return summary;
 }

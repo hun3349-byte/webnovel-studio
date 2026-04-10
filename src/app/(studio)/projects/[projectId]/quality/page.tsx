@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import Link from 'next/link';
 
 interface Episode {
   id: string;
@@ -115,6 +114,7 @@ export default function QualityPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          projectId,
           content: episode.content,
           episodeNumber: episode.episode_number,
           mode: episode.episode_number === 1 ? 'first-episode' : 'full',

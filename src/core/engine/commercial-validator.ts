@@ -1,25 +1,8 @@
-/**
- * 상업 웹소설 퀄리티 검증기
- *
- * 생성된 에피소드의 상업적 품질을 자동으로 평가합니다.
- *
- * 검증 항목:
- * 1. 분량 (4,000~6,000자)
- * 2. 절단신공 (클리프행어)
- * 3. Show Don't Tell (감정 직접 서술 금지)
- * 4. 대사 비율 (70/30 법칙)
- * 5. 문장 리듬 (단짠단짠)
- * 6. 금기어 검출
- */
+import type { MergedStyleDNA } from '@/types/style-dna';
 
 export interface ValidationResult {
-  // 전체 점수 (0~100)
   overallScore: number;
-
-  // 통과 여부
   passed: boolean;
-
-  // 상세 점수
   scores: {
     charCount: CharCountScore;
     cliffhanger: CliffhangerScore;
@@ -27,13 +10,14 @@ export interface ValidationResult {
     dialogueRatio: DialogueRatioScore;
     sentenceRhythm: SentenceRhythmScore;
     forbiddenWords: ForbiddenWordsScore;
+    writingDna: WritingDnaScore;
   };
-
-  // 개선 제안
   suggestions: string[];
-
-  // 경고
   warnings: string[];
+}
+
+interface ValidatorOptions {
+  writingDna?: MergedStyleDNA | null;
 }
 
 interface CharCountScore {
@@ -77,278 +61,198 @@ interface ForbiddenWordsScore {
   violationCount: number;
 }
 
-// 감정 직접 서술 패턴 (Show Don't Tell 위반)
-const TELL_PATTERNS: { pattern: RegExp; suggestion: string }[] = [
-  { pattern: /슬펐다|슬퍼[했졌]|슬픔[이을]/g, suggestion: '눈물, 떨리는 목소리, 굳은 표정으로 표현' },
-  { pattern: /화[가났]|분노[했를]/g, suggestion: '이를 악물다, 주먹을 쥐다, 목소리가 높아지다로 표현' },
-  { pattern: /기뻤다|기쁨[을이]/g, suggestion: '미소, 들뜬 목소리, 가벼운 발걸음으로 표현' },
-  { pattern: /긴장[했되]/g, suggestion: '심장이 뛰다, 손에 땀, 숨을 멈추다로 표현' },
-  { pattern: /두려[웠움]/g, suggestion: '떨리는 손, 식은땀, 뒷걸음질로 표현' },
-  { pattern: /행복[했해]/g, suggestion: '얼굴이 밝아지다, 콧노래, 입꼬리가 올라가다로 표현' },
-  { pattern: /불안[했해]/g, suggestion: '손을 비비다, 눈동자가 흔들리다, 안절부절로 표현' },
-  { pattern: /당황[했스]/g, suggestion: '굳은 표정, 말을 더듬다, 시선을 피하다로 표현' },
-  { pattern: /놀랐|놀라[서움]/g, suggestion: '눈이 커지다, 숨이 멎다, 입이 벌어지다로 표현' },
-  { pattern: /무서[웠워]/g, suggestion: '오싹함, 소름, 심장이 쿵쾅으로 표현' },
-];
-
-// 현대 외래어 금기어 (무협/동양 판타지)
-const FORBIDDEN_WORDS = [
-  '오케이', 'OK', '팁', '마스터', '레벨', '패턴', '리듬', '타이밍',
-  '센스', '포인트', '미션', '퀘스트', '스킬', '버프', '너프', '밸런스',
-  '시스템', '업그레이드', '다운그레이드', '랭킹', '보너스', '이벤트',
-  '갓', 'GOD', 'OP', '치트', '핵', '버그', '글리치',
-];
-
-// 절단신공 키워드 패턴
-const CLIFFHANGER_PATTERNS = {
-  crisis: /위기|곤경|함정|포위|죽음|절체절명|막다른|최후의/,
-  discovery: /발견|드러나|정체가|진실이|비밀이|숨겨진|알게 되|깨달/,
-  reversal: /반전|뒤집|예상[과치와]|믿을 수 없|설마|아닐|어떻게/,
-  declaration: /선언|선포|맹세|약속|반드시|결의|다짐|각오/,
-};
-
-/**
- * 에피소드 퀄리티 검증
- */
-export function validateEpisode(content: string): ValidationResult {
-  const scores = {
-    charCount: validateCharCount(content),
-    cliffhanger: validateCliffhanger(content),
-    showDontTell: validateShowDontTell(content),
-    dialogueRatio: validateDialogueRatio(content),
-    sentenceRhythm: validateSentenceRhythm(content),
-    forbiddenWords: validateForbiddenWords(content),
-  };
-
-  // 가중치 적용 전체 점수 계산
-  const weights = {
-    charCount: 0.20,
-    cliffhanger: 0.25,
-    showDontTell: 0.20,
-    dialogueRatio: 0.10,
-    sentenceRhythm: 0.10,
-    forbiddenWords: 0.15,
-  };
-
-  const overallScore = Math.round(
-    scores.charCount.score * weights.charCount +
-    scores.cliffhanger.score * weights.cliffhanger +
-    scores.showDontTell.score * weights.showDontTell +
-    scores.dialogueRatio.score * weights.dialogueRatio +
-    scores.sentenceRhythm.score * weights.sentenceRhythm +
-    scores.forbiddenWords.score * weights.forbiddenWords
-  );
-
-  // 통과 기준: 70점 이상 + 치명적 위반 없음
-  const hasCriticalIssue =
-    scores.charCount.status === 'under' ||
-    scores.forbiddenWords.violationCount > 3;
-
-  const passed = overallScore >= 70 && !hasCriticalIssue;
-
-  // 개선 제안 생성
-  const suggestions: string[] = [];
-  const warnings: string[] = [];
-
-  if (scores.charCount.status === 'under') {
-    suggestions.push(`분량이 ${scores.charCount.charCount}자로 부족합니다. ${4000 - scores.charCount.charCount}자 이상 추가해주세요.`);
-  } else if (scores.charCount.status === 'over') {
-    warnings.push(`분량이 ${scores.charCount.charCount}자로 권장치를 초과했습니다.`);
-  }
-
-  if (scores.cliffhanger.score < 70) {
-    suggestions.push('마지막 장면에 더 강한 클리프행어가 필요합니다. 위기/발견/반전/선언 중 하나로 끝내세요.');
-  }
-
-  if (scores.showDontTell.violations.length > 0) {
-    const top3 = scores.showDontTell.violations.slice(0, 3);
-    top3.forEach(v => {
-      suggestions.push(`"${v.text}" → ${v.suggestion}`);
-    });
-  }
-
-  if (!scores.dialogueRatio.isBalanced) {
-    if (scores.dialogueRatio.dialoguePercent > 50) {
-      suggestions.push('대사 비율이 너무 높습니다. 서술과 묘사를 더 추가해주세요.');
-    } else if (scores.dialogueRatio.dialoguePercent < 20) {
-      suggestions.push('대사 비율이 너무 낮습니다. 인물 간 대화를 추가해주세요.');
-    }
-  }
-
-  if (!scores.sentenceRhythm.hasGoodRhythm) {
-    suggestions.push('문장 리듬에 변화가 필요합니다. 짧은 문장과 긴 문장을 섞어주세요.');
-  }
-
-  if (scores.forbiddenWords.violations.length > 0) {
-    scores.forbiddenWords.violations.forEach(v => {
-      warnings.push(`금기어 "${v.word}" 발견: "${v.context}"`);
-    });
-  }
-
-  return {
-    overallScore,
-    passed,
-    scores,
-    suggestions,
-    warnings,
-  };
+export interface WritingDnaViolation {
+  rule: string;
+  context: string;
+  suggestion: string;
 }
 
-/**
- * 분량 검증
- */
+interface WritingDnaScore {
+  score: number;
+  activeRuleCount: number;
+  violationCount: number;
+  violations: WritingDnaViolation[];
+}
+
+const TELL_PATTERNS: { pattern: RegExp; suggestion: string }[] = [
+  { pattern: /슬펐(?:다|다며|다면서)|슬퍼했다/g, suggestion: '표정, 목소리, 몸의 반응으로 슬픔을 보여주세요.' },
+  { pattern: /화가 났(?:다|다며)|분노했(?:다|다며)/g, suggestion: '손끝, 시선, 호흡 변화로 분노를 드러내세요.' },
+  { pattern: /기뻤(?:다|다며)|기뻐했(?:다|다며)/g, suggestion: '미소나 몸의 이완 같은 반응으로 기쁨을 표현하세요.' },
+  { pattern: /긴장했(?:다|다며)|긴장감이 돌았다/g, suggestion: '목이 마르거나 숨이 가빠지는 신체 반응으로 바꿔보세요.' },
+  { pattern: /두려웠(?:다|다며)|무서웠(?:다|다며)/g, suggestion: '심장 박동, 시야, 땀 같은 감각으로 공포를 표현하세요.' },
+  { pattern: /불안했(?:다|다며)|초조했(?:다|다며)/g, suggestion: '손끝의 움직임이나 시선의 흔들림으로 바꿔보세요.' },
+  { pattern: /당황했(?:다|다며)|놀랐(?:다|다며)/g, suggestion: '굳은 자세, 멈춘 호흡, 시선 변화로 표현하세요.' },
+];
+
+const FORBIDDEN_WORDS = [
+  '팁',
+  '오케이',
+  '마스터',
+  '레벨',
+  '스킬',
+  '버프',
+  '디버프',
+  '퀘스트',
+  '미션',
+  '랭크',
+  '치트',
+  '버그',
+  '글리치',
+  'OP',
+  'GOD',
+];
+
+const CLIFFHANGER_PATTERNS = {
+  crisis: /위기|경직|함정|사위|죽음|정체불명|막다른|최후/i,
+  discovery: /발견|드러났|정체가|진실|비밀|깨어지|깨달/i,
+  reversal: /반전|뒤집|예상과|믿을 수 없는|설마|아니었다/i,
+  declaration: /선언|선포|맹세|약속|결의|다짐|각오/i,
+};
+
+function clampScore(score: number) {
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function getContextSnippet(content: string, index: number, length: number) {
+  const start = Math.max(0, index - 20);
+  const end = Math.min(content.length, index + length + 20);
+  return content.slice(start, end).trim();
+}
+
 function validateCharCount(content: string): CharCountScore {
   const charCount = content.length;
   const target = { min: 4000, max: 6000 };
 
-  let score: number;
-  let status: 'under' | 'good' | 'over';
-
   if (charCount < target.min) {
-    // 최소치 미만: 비례 점수
-    score = Math.max(0, Math.round((charCount / target.min) * 70));
-    status = 'under';
-  } else if (charCount > target.max) {
-    // 최대치 초과: 감점
-    const overBy = charCount - target.max;
-    score = Math.max(50, 100 - Math.round(overBy / 100) * 5);
-    status = 'over';
-  } else {
-    // 적정 범위
-    score = 100;
-    status = 'good';
+    return {
+      score: clampScore((charCount / target.min) * 70),
+      charCount,
+      target,
+      status: 'under',
+    };
   }
 
-  return { score, charCount, target, status };
+  if (charCount > target.max) {
+    return {
+      score: clampScore(100 - Math.round((charCount - target.max) / 100) * 5),
+      charCount,
+      target,
+      status: 'over',
+    };
+  }
+
+  return {
+    score: 100,
+    charCount,
+    target,
+    status: 'good',
+  };
 }
 
-/**
- * 절단신공 검증
- */
 function validateCliffhanger(content: string): CliffhangerScore {
-  // 마지막 500자 분석
   const lastPart = content.slice(-500);
-  const sentences = lastPart.split(/[.!?]\s*/).filter(s => s.trim().length > 5);
+  const sentences = lastPart
+    .split(/[.!?]\s*|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 5);
   const lastSentences = sentences.slice(-3);
   const lastText = lastSentences.join(' ');
 
   let detectedType: string | null = null;
-  let score = 50; // 기본 점수
+  let score = 50;
 
-  // 절단신공 패턴 검사
   if (CLIFFHANGER_PATTERNS.crisis.test(lastText)) {
-    detectedType = '위기';
+    detectedType = 'crisis';
     score = 90;
   } else if (CLIFFHANGER_PATTERNS.discovery.test(lastText)) {
-    detectedType = '발견';
+    detectedType = 'discovery';
     score = 85;
   } else if (CLIFFHANGER_PATTERNS.reversal.test(lastText)) {
-    detectedType = '반전';
+    detectedType = 'reversal';
     score = 90;
   } else if (CLIFFHANGER_PATTERNS.declaration.test(lastText)) {
-    detectedType = '선언';
+    detectedType = 'declaration';
     score = 80;
   }
 
-  // 마침표로 끝나면 약간 감점 (느낌표/물음표가 더 강렬)
   if (lastText.trim().endsWith('.') && !detectedType) {
     score -= 10;
   }
 
-  // 짧고 강렬한 마지막 문장 가산점
   const lastSentence = lastSentences[lastSentences.length - 1] || '';
   if (lastSentence.length < 30 && lastSentence.length > 5) {
-    score = Math.min(100, score + 10);
+    score += 10;
   }
 
-  const explanation = detectedType
-    ? `"${detectedType}" 유형의 클리프행어가 감지되었습니다.`
-    : '명확한 클리프행어 패턴이 감지되지 않았습니다.';
-
   return {
-    score,
+    score: clampScore(score),
     lastSentences,
     detectedType,
-    explanation,
+    explanation: detectedType
+      ? `${detectedType} type ending hook detected.`
+      : 'No strong ending hook was detected.',
   };
 }
 
-/**
- * Show Don't Tell 검증
- */
 function validateShowDontTell(content: string): ShowDontTellScore {
   const violations: { text: string; suggestion: string }[] = [];
 
-  TELL_PATTERNS.forEach(({ pattern, suggestion }) => {
-    const matches = content.match(pattern);
-    if (matches) {
-      matches.forEach(match => {
-        // 컨텍스트 추출
-        const idx = content.indexOf(match);
-        const start = Math.max(0, idx - 10);
-        const end = Math.min(content.length, idx + match.length + 10);
-        const context = content.slice(start, end);
+  for (const { pattern, suggestion } of TELL_PATTERNS) {
+    let match: RegExpExecArray | null = null;
+    const regex = new RegExp(pattern);
 
-        violations.push({
-          text: context.trim(),
-          suggestion,
-        });
+    while ((match = regex.exec(content)) !== null) {
+      violations.push({
+        text: getContextSnippet(content, match.index, match[0].length),
+        suggestion,
       });
-    }
-  });
 
-  // 중복 제거
+      if (!regex.global) break;
+    }
+  }
+
   const uniqueViolations = violations.filter(
-    (v, i, arr) => arr.findIndex(x => x.text === v.text) === i
+    (violation, index, array) => array.findIndex((item) => item.text === violation.text) === index
   );
 
-  // 점수 계산: 위반 1개당 -10점
-  const score = Math.max(0, 100 - uniqueViolations.length * 10);
-
   return {
-    score,
-    violations: uniqueViolations.slice(0, 10), // 최대 10개만
+    score: clampScore(100 - uniqueViolations.length * 10),
+    violations: uniqueViolations.slice(0, 10),
     violationCount: uniqueViolations.length,
   };
 }
 
-/**
- * 대사 비율 검증
- */
 function validateDialogueRatio(content: string): DialogueRatioScore {
-  // 대사 추출 (따옴표로 둘러싸인 텍스트)
-  const dialogueMatches = content.match(/[""][^""]+[""]/g) || [];
+  const dialogueMatches = content.match(/["“”][^"“”]+["“”]/g) || [];
   const dialogueLength = dialogueMatches.join('').length;
-
-  const totalLength = content.length;
+  const totalLength = Math.max(content.length, 1);
   const dialoguePercent = Math.round((dialogueLength / totalLength) * 100);
   const narrativePercent = 100 - dialoguePercent;
-
-  // 이상적인 비율: 대사 25~40%
   const isBalanced = dialoguePercent >= 20 && dialoguePercent <= 50;
 
-  let score: number;
-  if (isBalanced) {
-    score = 100;
-  } else if (dialoguePercent < 20) {
-    score = 70 + dialoguePercent;
-  } else {
-    score = Math.max(50, 100 - (dialoguePercent - 50));
+  let score = 100;
+
+  if (!isBalanced) {
+    if (dialoguePercent < 20) {
+      score = 70 + dialoguePercent;
+    } else {
+      score = 100 - (dialoguePercent - 50);
+    }
   }
 
   return {
-    score,
+    score: clampScore(score),
     dialoguePercent,
     narrativePercent,
     isBalanced,
   };
 }
 
-/**
- * 문장 리듬 검증
- */
 function validateSentenceRhythm(content: string): SentenceRhythmScore {
-  const sentences = content.split(/[.!?]\s*/).filter(s => s.trim().length > 0);
+  const sentences = content
+    .split(/[.!?]\s*|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
 
   if (sentences.length === 0) {
     return {
@@ -360,32 +264,22 @@ function validateSentenceRhythm(content: string): SentenceRhythmScore {
     };
   }
 
-  const lengths = sentences.map(s => s.length);
-  const avgSentenceLength = Math.round(lengths.reduce((a, b) => a + b, 0) / lengths.length);
-
-  // 짧은 문장 (15자 이하), 긴 문장 (40자 이상) 비율
-  const shortSentences = lengths.filter(l => l <= 15).length;
-  const longSentences = lengths.filter(l => l >= 40).length;
-
+  const lengths = sentences.map((sentence) => sentence.length);
+  const avgSentenceLength = Math.round(lengths.reduce((sum, length) => sum + length, 0) / lengths.length);
+  const shortSentences = lengths.filter((length) => length <= 15).length;
+  const longSentences = lengths.filter((length) => length >= 40).length;
   const shortSentenceRatio = Math.round((shortSentences / sentences.length) * 100);
   const longSentenceRatio = Math.round((longSentences / sentences.length) * 100);
-
-  // 좋은 리듬: 짧은 문장 20~40%, 긴 문장 10~30%
   const hasGoodRhythm =
-    shortSentenceRatio >= 15 && shortSentenceRatio <= 50 &&
-    longSentenceRatio >= 5 && longSentenceRatio <= 40;
+    shortSentenceRatio >= 15 &&
+    shortSentenceRatio <= 50 &&
+    longSentenceRatio >= 5 &&
+    longSentenceRatio <= 40;
 
-  let score: number;
-  if (hasGoodRhythm) {
-    score = 100;
-  } else {
-    // 단조로운 리듬 감점
-    const varietyScore = Math.abs(shortSentenceRatio - 30) + Math.abs(longSentenceRatio - 20);
-    score = Math.max(50, 100 - varietyScore);
-  }
+  const varietyPenalty = Math.abs(shortSentenceRatio - 30) + Math.abs(longSentenceRatio - 20);
 
   return {
-    score,
+    score: hasGoodRhythm ? 100 : clampScore(100 - varietyPenalty),
     avgSentenceLength,
     shortSentenceRatio,
     longSentenceRatio,
@@ -393,60 +287,236 @@ function validateSentenceRhythm(content: string): SentenceRhythmScore {
   };
 }
 
-/**
- * 금기어 검증
- */
 function validateForbiddenWords(content: string): ForbiddenWordsScore {
   const violations: { word: string; context: string }[] = [];
 
-  FORBIDDEN_WORDS.forEach(word => {
+  for (const word of FORBIDDEN_WORDS) {
     const regex = new RegExp(word, 'gi');
-    let match;
+    let match: RegExpExecArray | null = null;
+
     while ((match = regex.exec(content)) !== null) {
-      const start = Math.max(0, match.index - 15);
-      const end = Math.min(content.length, match.index + word.length + 15);
       violations.push({
         word,
-        context: content.slice(start, end).trim(),
+        context: getContextSnippet(content, match.index, match[0].length),
       });
     }
-  });
-
-  // 점수: 위반 1개당 -20점
-  const score = Math.max(0, 100 - violations.length * 20);
+  }
 
   return {
-    score,
+    score: clampScore(100 - violations.length * 20),
     violations: violations.slice(0, 10),
     violationCount: violations.length,
   };
 }
 
-/**
- * 빠른 검증 (핵심 항목만)
- */
-export function quickValidate(content: string): {
-  charCount: number;
-  passed: boolean;
-  issues: string[];
-} {
+function buildWritingDnaRegex(rule: string) {
+  const escaped = rule
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+
+  return new RegExp(escaped, 'i');
+}
+
+function findConsecutiveShortParagraphViolation(content: string) {
+  const paragraphs = content
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  let streak = 0;
+
+  for (const paragraph of paragraphs) {
+    const sentenceCount = paragraph
+      .split(/[.!?]\s*|\n+/)
+      .map((sentence) => sentence.trim())
+      .filter(Boolean).length;
+
+    if (sentenceCount <= 1) {
+      streak += 1;
+      if (streak >= 2) return paragraph;
+    } else {
+      streak = 0;
+    }
+  }
+
+  return null;
+}
+
+function validateWritingDna(content: string, writingDna?: MergedStyleDNA | null): WritingDnaScore {
+  if (!writingDna) {
+    return {
+      score: 100,
+      activeRuleCount: 0,
+      violationCount: 0,
+      violations: [],
+    };
+  }
+
+  const violations: WritingDnaViolation[] = [];
+  const activeRules = [
+    ...(writingDna.avoidPatterns || []),
+    ...(writingDna.favorPatterns || []),
+    writingDna.proseStyle,
+    writingDna.rhythmPattern,
+    writingDna.dialogueStyle,
+    writingDna.emotionExpression,
+    writingDna.sceneTransition,
+    writingDna.actionDescription,
+  ].filter(Boolean).length;
+
+  for (const rule of writingDna.avoidPatterns.slice(0, 10)) {
+    const regex = buildWritingDnaRegex(rule);
+    const match = regex.exec(content);
+    if (match) {
+      violations.push({
+        rule,
+        context: getContextSnippet(content, match.index, match[0].length),
+        suggestion: `Writing DNA 금지 규칙 "${rule}"을 피하도록 문장을 다시 다듬어주세요.`,
+      });
+    }
+  }
+
+  if (
+    /단문|스타카토|짧은 문장/i.test(
+      [writingDna.rhythmPattern, ...writingDna.avoidPatterns, ...writingDna.favorPatterns].join(' ')
+    )
+  ) {
+    const paragraph = findConsecutiveShortParagraphViolation(content);
+    if (paragraph) {
+      violations.push({
+        rule: '단문 반복 금지',
+        context: paragraph,
+        suggestion: '짧은 문장을 연달아 끊지 말고 연결되는 행동과 감각을 한 문단으로 묶어주세요.',
+      });
+    }
+  }
+
+  if (
+    /감정|show don't tell|직접 설명/i.test(
+      [writingDna.emotionExpression, ...writingDna.avoidPatterns, ...writingDna.favorPatterns].join(' ')
+    )
+  ) {
+    const tellScore = validateShowDontTell(content);
+    for (const violation of tellScore.violations.slice(0, 3)) {
+      violations.push({
+        rule: '감정 직접 설명 금지',
+        context: violation.text,
+        suggestion: violation.suggestion,
+      });
+    }
+  }
+
+  const uniqueViolations = violations.filter(
+    (violation, index, array) =>
+      array.findIndex((item) => item.rule === violation.rule && item.context === violation.context) === index
+  );
+
+  return {
+    score: clampScore(100 - uniqueViolations.length * 12),
+    activeRuleCount: activeRules,
+    violationCount: uniqueViolations.length,
+    violations: uniqueViolations.slice(0, 8),
+  };
+}
+
+export function validateEpisode(content: string, options: ValidatorOptions = {}): ValidationResult {
+  const scores = {
+    charCount: validateCharCount(content),
+    cliffhanger: validateCliffhanger(content),
+    showDontTell: validateShowDontTell(content),
+    dialogueRatio: validateDialogueRatio(content),
+    sentenceRhythm: validateSentenceRhythm(content),
+    forbiddenWords: validateForbiddenWords(content),
+    writingDna: validateWritingDna(content, options.writingDna),
+  };
+
+  const baseWeightedScore =
+    scores.charCount.score * 0.18 +
+    scores.cliffhanger.score * 0.22 +
+    scores.showDontTell.score * 0.18 +
+    scores.dialogueRatio.score * 0.1 +
+    scores.sentenceRhythm.score * 0.1 +
+    scores.forbiddenWords.score * 0.12 +
+    scores.writingDna.score * 0.1;
+
+  const overallScore = clampScore(baseWeightedScore);
+
+  const hasCriticalIssue =
+    scores.charCount.status === 'under' || scores.forbiddenWords.violationCount > 3;
+
+  const passed = overallScore >= 70 && !hasCriticalIssue;
+
+  const suggestions: string[] = [];
+  const warnings: string[] = [];
+
+  if (scores.charCount.status === 'under') {
+    suggestions.push(
+      `분량이 ${scores.charCount.charCount}자로 부족합니다. 최소 ${scores.charCount.target.min.toLocaleString()}자 이상으로 보강해주세요.`
+    );
+  } else if (scores.charCount.status === 'over') {
+    warnings.push(`분량이 ${scores.charCount.charCount}자로 권장 상한을 넘었습니다.`);
+  }
+
+  if (scores.cliffhanger.score < 70) {
+    suggestions.push('엔딩에 위기, 발견, 반전, 선언 중 하나를 더 선명하게 배치해주세요.');
+  }
+
+  for (const violation of scores.showDontTell.violations.slice(0, 3)) {
+    suggestions.push(`"${violation.text}" → ${violation.suggestion}`);
+  }
+
+  if (!scores.dialogueRatio.isBalanced) {
+    if (scores.dialogueRatio.dialoguePercent > 50) {
+      suggestions.push('대사 비중이 높습니다. 행동과 서술을 보강해 호흡을 안정시켜주세요.');
+    } else {
+      suggestions.push('대사 비중이 낮습니다. 인물 반응과 짧은 대사를 보강해 장면의 생동감을 살려주세요.');
+    }
+  }
+
+  if (!scores.sentenceRhythm.hasGoodRhythm) {
+    suggestions.push('문장 길이 변주가 부족합니다. 짧은 문장과 긴 문장을 더 자연스럽게 섞어주세요.');
+  }
+
+  for (const violation of scores.forbiddenWords.violations) {
+    warnings.push(`금기어 "${violation.word}" 발견: ${violation.context}`);
+  }
+
+  for (const violation of scores.writingDna.violations.slice(0, 4)) {
+    suggestions.push(`[Writing DNA] ${violation.rule}: ${violation.suggestion}`);
+  }
+
+  return {
+    overallScore,
+    passed,
+    scores,
+    suggestions,
+    warnings,
+  };
+}
+
+export function quickValidate(content: string, options: ValidatorOptions = {}) {
   const charCount = content.length;
   const issues: string[] = [];
 
   if (charCount < 3500) {
-    issues.push(`분량 부족 (${charCount}자 / 최소 4,000자)`);
+    issues.push(`분량 부족 (${charCount}자 / 최소 4,000자 권장)`);
   }
 
   if (charCount > 7000) {
-    issues.push(`분량 초과 (${charCount}자 / 최대 6,000자)`);
+    issues.push(`분량 초과 (${charCount}자 / 최대 6,000자 권장)`);
   }
 
-  // 금기어 빠른 체크
-  const foundForbidden = FORBIDDEN_WORDS.filter(word =>
+  const foundForbidden = FORBIDDEN_WORDS.filter((word) =>
     content.toLowerCase().includes(word.toLowerCase())
   );
+
   if (foundForbidden.length > 0) {
     issues.push(`금기어 발견: ${foundForbidden.join(', ')}`);
+  }
+
+  const writingDna = validateWritingDna(content, options.writingDna);
+  if (writingDna.violationCount > 0) {
+    issues.push(`Writing DNA 위반 ${writingDna.violationCount}건`);
   }
 
   return {
@@ -456,10 +526,10 @@ export function quickValidate(content: string): {
   };
 }
 
-/**
- * 1화 특화 검증 (추가 규칙 적용)
- */
-export function validateFirstEpisode(content: string): ValidationResult & {
+export function validateFirstEpisode(
+  content: string,
+  options: ValidatorOptions = {}
+): ValidationResult & {
   firstEpisodeChecks: {
     hasStrongOpening: boolean;
     hasProtagonistIntro: boolean;
@@ -467,42 +537,38 @@ export function validateFirstEpisode(content: string): ValidationResult & {
     hasHook: boolean;
   };
 } {
-  const baseResult = validateEpisode(content);
-
-  // 1화 특화 체크
+  const baseResult = validateEpisode(content, options);
   const first500 = content.slice(0, 500);
+  const first1500 = content.slice(0, 1500);
+
   const firstEpisodeChecks = {
-    // 강렬한 시작 (액션, 감각, 위기로 시작)
-    hasStrongOpening: /피|칼|검|죽|싸|소리|냄새|차가|뜨거/.test(first500),
-    // 주인공 소개
-    hasProtagonistIntro: /그는|청년|이름은|불리|라고 했/.test(first500),
-    // 세계관 힌트
-    hasWorldHint: /강호|무림|문파|내공|무공/.test(content.slice(0, 1500)),
-    // 떡밥/미스터리 제시
-    hasHook: /비밀|미스터리|의문|정체|숨겨진|과거/.test(content),
+    hasStrongOpening: /차갑|피|비명|숨|낯선|깨|금속|발끝|눈을 떴/i.test(first500),
+    hasProtagonistIntro: /그는|소년|사내|이름|손|몸을 일으켰/i.test(first500),
+    hasWorldHint: /강호|무림|문파|관군|궁궐|전장|폐허|검|무공/i.test(first1500),
+    hasHook: /비밀|정체|왜|무엇|그 순간|그때|낯선|이상한/i.test(content),
   };
 
-  // 1화 보너스/감점
-  let firstEpisodeBonus = 0;
-  if (firstEpisodeChecks.hasStrongOpening) firstEpisodeBonus += 3;
-  if (firstEpisodeChecks.hasProtagonistIntro) firstEpisodeBonus += 2;
-  if (firstEpisodeChecks.hasWorldHint) firstEpisodeBonus += 2;
-  if (firstEpisodeChecks.hasHook) firstEpisodeBonus += 3;
+  let bonus = 0;
+  if (firstEpisodeChecks.hasStrongOpening) bonus += 3;
+  if (firstEpisodeChecks.hasProtagonistIntro) bonus += 2;
+  if (firstEpisodeChecks.hasWorldHint) bonus += 2;
+  if (firstEpisodeChecks.hasHook) bonus += 3;
 
-  // 1화 필수 요소 미충족 시 경고
   if (!firstEpisodeChecks.hasStrongOpening) {
-    baseResult.warnings.push('1화 시작이 약합니다. 감각적이고 강렬한 첫 문장이 필요합니다.');
+    baseResult.warnings.push('1화 초반의 감각적 훅이 약합니다. 첫 문장을 더 강하게 잡아주세요.');
   }
+
   if (!firstEpisodeChecks.hasProtagonistIntro) {
-    baseResult.warnings.push('주인공 소개가 부족해 보입니다.');
+    baseResult.warnings.push('1화 초반에 주인공의 존재감이 충분히 드러나지 않습니다.');
   }
+
   if (!firstEpisodeChecks.hasHook) {
-    baseResult.suggestions.push('1화에 미스터리나 떡밥을 심어 독자의 궁금증을 유발하세요.');
+    baseResult.suggestions.push('1화 안에 다음 화를 궁금하게 만드는 미스터리나 떡밥을 더 선명하게 남겨주세요.');
   }
 
   return {
     ...baseResult,
-    overallScore: Math.min(100, baseResult.overallScore + firstEpisodeBonus),
+    overallScore: clampScore(baseResult.overallScore + bonus),
     firstEpisodeChecks,
   };
 }

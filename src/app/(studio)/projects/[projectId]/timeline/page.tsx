@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { getEpisodeEditorPath } from '@/lib/editor/get-episode-editor-path';
 
 interface Episode {
   id: string;
@@ -140,6 +141,7 @@ export default function TimelinePage() {
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [stats, setStats] = useState<Stats | null>(null);
   const [allHooks, setAllHooks] = useState<Hook[]>([]);
+  const [allCharacters, setAllCharacters] = useState<Character[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
@@ -163,9 +165,10 @@ export default function TimelinePage() {
       if (!timelineRes.ok) throw new Error('Failed to load timeline');
 
       const data = await timelineRes.json();
-      setTimeline(data.timeline);
-      setStats(data.stats);
-      setAllHooks(data.hooks);
+      setTimeline(data.timeline || []);
+      setStats(data.stats || null);
+      setAllHooks(data.hooks || []);
+      setAllCharacters(data.characters || []);
 
       if (eventsRes.ok) {
         const eventsData = await eventsRes.json();
@@ -305,7 +308,7 @@ export default function TimelinePage() {
       )}
 
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {timeline.length === 0 ? (
+        {viewMode === 'timeline' && timeline.length === 0 ? (
           <div className="text-center py-20">
             <div className="text-6xl mb-4">📖</div>
             <h2 className="text-xl font-semibold mb-2">아직 에피소드가 없습니다</h2>
@@ -327,7 +330,7 @@ export default function TimelinePage() {
         ) : viewMode === 'hooks' ? (
           <HooksView hooks={allHooks} timeline={timeline} />
         ) : viewMode === 'characters' ? (
-          <CharactersView timeline={timeline} />
+          <CharactersView timeline={timeline} allCharacters={allCharacters} />
         ) : viewMode === 'synopsis' ? (
           <GlobalSynopsisView
             projectId={projectId}
@@ -394,7 +397,13 @@ function TimelineView({
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <Link
-                    href={`/projects/${projectId}/episodes/${item.episode.id}`}
+                    href={getEpisodeEditorPath(projectId, item.episode.id)}
+                    onClick={() =>
+                      console.log(
+                        '[TimelinePage] navigate ->',
+                        getEpisodeEditorPath(projectId, item.episode.id)
+                      )
+                    }
                     className="font-semibold hover:text-blue-400 transition"
                   >
                     {item.episode.number}화: {item.episode.title || '제목 없음'}
@@ -592,11 +601,18 @@ function HooksView({ hooks, timeline }: { hooks: Hook[]; timeline: TimelineItem[
 }
 
 // 캐릭터 뷰
-function CharactersView({ timeline }: { timeline: TimelineItem[] }) {
-  // 모든 캐릭터 수집
-  const allCharacters = timeline.flatMap(t => t.newCharacters);
+function CharactersView({
+  timeline,
+  allCharacters,
+}: {
+  timeline: TimelineItem[];
+  allCharacters: Character[];
+}) {
+  // 우선 타임라인 기반 캐릭터를 사용하고, 없으면 API 전체 캐릭터를 fallback으로 사용
+  const timelineCharacters = timeline.flatMap(t => t.newCharacters);
+  const characters = timelineCharacters.length > 0 ? timelineCharacters : allCharacters;
 
-  if (allCharacters.length === 0) {
+  if (characters.length === 0) {
     return (
       <div className="text-center py-12 text-gray-400">
         아직 등록된 캐릭터가 없습니다
@@ -605,7 +621,7 @@ function CharactersView({ timeline }: { timeline: TimelineItem[] }) {
   }
 
   // 역할별 그룹화
-  const byRole = allCharacters.reduce((acc, char) => {
+  const byRole = characters.reduce((acc, char) => {
     const role = char.role || 'extra';
     if (!acc[role]) acc[role] = [];
     acc[role].push(char);
@@ -651,7 +667,7 @@ function CharactersView({ timeline }: { timeline: TimelineItem[] }) {
                         )}
                       </div>
                       <div className="text-xs text-gray-400">
-                        첫 등장: {char.first_appearance_episode}화
+                        첫 등장: {char.first_appearance_episode ?? '-'}화
                       </div>
                     </div>
                   </div>

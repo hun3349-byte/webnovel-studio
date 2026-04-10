@@ -61,6 +61,7 @@ export function formatForNaver(
 
   // 마크다운 제거 (웹소설에서는 사용하지 않음)
   formatted = removeMarkdown(formatted);
+  formatted = normalizeForNaverSerial(formatted);
 
   // 글자 수 체크
   const charCount = formatted.length;
@@ -175,6 +176,67 @@ function processSceneBreaks(
 /**
  * 대사 강조 처리 (따옴표로 둘러싸인 텍스트)
  */
+function normalizeForNaverSerial(text: string): string {
+  const paragraphs = text
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n+/g, ' ').replace(/\s{2,}/g, ' ').trim())
+    .filter(Boolean);
+
+  const merged: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (paragraph === '---SCENE_BREAK---') {
+      merged.push(paragraph);
+      continue;
+    }
+
+    const previous = merged[merged.length - 1];
+    if (shouldMergeParagraphs(previous, paragraph)) {
+      merged[merged.length - 1] = `${previous} ${paragraph}`.replace(/\s{2,}/g, ' ').trim();
+      continue;
+    }
+
+    merged.push(paragraph);
+  }
+
+  return merged.join('\n\n');
+}
+
+function shouldMergeParagraphs(previous: string | undefined, current: string): boolean {
+  if (!previous || !current) return false;
+  if (previous === '---SCENE_BREAK---' || current === '---SCENE_BREAK---') return false;
+
+  if (!endsLikeCompleteSentence(previous)) {
+    return true;
+  }
+
+  if (isShortNarrativeParagraph(previous) && isShortNarrativeParagraph(current)) {
+    return true;
+  }
+
+  return false;
+}
+
+function endsLikeCompleteSentence(paragraph: string): boolean {
+  return /[.!?…"”'’」』】]$/.test(paragraph.trim());
+}
+
+function isShortNarrativeParagraph(paragraph: string): boolean {
+  const trimmed = paragraph.trim();
+  if (!trimmed) return false;
+  if (isDialogueOnlyParagraph(trimmed)) return false;
+  if (trimmed.length > 32) return false;
+
+  const sentenceCount = (trimmed.match(/[.!?…]/g) || []).length;
+  return sentenceCount <= 1;
+}
+
+function isDialogueOnlyParagraph(paragraph: string): boolean {
+  const trimmed = paragraph.trim();
+  return /^["'“‘].+["'”’]$/.test(trimmed);
+}
+
 function highlightDialogues(text: string): string {
   // 큰따옴표 대사
   return text.replace(/"([^"]+)"/g, '<span class="dialogue">"$1"</span>');

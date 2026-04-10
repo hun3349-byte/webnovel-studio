@@ -51,13 +51,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     const body = await request.json();
-    const { title, genre, target_platform, status } = body;
+    const { title, genre, target_platform, status, generation_mode, generation_config } = body;
 
     const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (title !== undefined) updateData.title = title;
     if (genre !== undefined) updateData.genre = genre;
     if (target_platform !== undefined) updateData.target_platform = target_platform;
     if (status !== undefined) updateData.status = status;
+    if (generation_mode !== undefined) {
+      updateData.generation_mode = 'claude_legacy';
+    }
+    if (generation_config !== undefined) {
+      updateData.generation_config = sanitizeGenerationConfig(generation_config);
+    }
 
     const { data, error } = await supabase
       .from('projects')
@@ -76,6 +82,19 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       { status: 500 }
     );
   }
+}
+
+function sanitizeGenerationConfig(config: unknown): Record<string, unknown> {
+  const base = (config && typeof config === 'object')
+    ? { ...(config as Record<string, unknown>) }
+    : {};
+
+  return {
+    ...base,
+    generation_mode: 'claude_legacy',
+    plannerEnabled: false,
+    punchupEnabled: false,
+  };
 }
 
 // DELETE /api/projects/[projectId] - 프로젝트 삭제

@@ -1,837 +1,670 @@
-import type { SlidingWindowContext, TimelineEvent, ActiveCharacter } from '@/types/memory';
-import { buildWritingMemoryPrompt, logInjectedRules } from '@/lib/utils/writing-memory';
-import { buildDynamicStyleDNA, getDefaultStyleDNA } from '@/core/style/style-injector';
+import type { ActiveCharacter, SlidingWindowContext } from '@/types/memory';
 
-// Writing Memory 시스템 규칙 로드 확인 (서버 시작 시 1회)
-if (typeof window === 'undefined') {
-  logInjectedRules();
+const WRITER_PERSONA = `
+<writer_persona>
+너는 대한민국 최고의 상업 웹소설 작가(하드보일드/다크 판타지 특화)다.
+너의 문장은 차갑고 건조하지만 몰입감이 높다.
+너는 이야기를 지어내는 사람이 아니라, 이미 일어난 사건 기록(세계관/캐릭터/시놉시스)을 관찰해 소설로 각색하는 사람이다.
+기획자(사용자)가 제공한 설계도(시놉시스)에 100% 복종하며, 없는 사건이나 인물을 창조하는 순간 실패다.
+</writer_persona>
+`.trim();
+
+const CORE_CONSTITUTION = `
+<core_constitution>
+[Rule 1: Story Bible Absolute Priority]
+- 사용자 시놉시스/세계관/캐릭터가 절대 기준이다.
+- 사전학습 지식(실제 역사/클리셰) 개입 금지.
+- 시놉시스에 없는 핵심 인물/배경/사건 임의 창조 금지.
+
+[Rule 2: Continuity via Memory Log]
+- 직전 회차 핵심 포인트, 떡밥, 흐름을 반드시 이어라.
+- 시간선/감정선/사건선이 끊기면 실패다.
+
+[Rule 3: Organic Character Handling]
+- 사용자 캐릭터 DB를 최우선 사용.
+- 엑스트라가 필요하면 기존 세계관 톤을 해치지 않는 최소 범위에서만 자연스럽게 사용.
+
+[Rule 4: No Staccato]
+- 짧은 단문을 여러 단락으로 쪼개는 스타카토 문체 금지.
+- 연결되는 행동과 감각은 긴 호흡의 자연스러운 문장으로 이어라.
+
+[Rule 5: Show, Don't Tell]
+- 감정/배경/성격을 해설하지 마라.
+- 행동, 표정, 대사, 감각 묘사로 보여줘라.
+</core_constitution>
+`.trim();
+
+const OUTPUT_CONTRACT = `
+<output_contract>
+- 순수 본문만 출력한다.
+- 마크다운, 메타 설명, 계획표 출력 금지.
+- 분량은 공백 포함 4,000~6,000자를 목표로 한다.
+- 마지막 문단은 다음 화 궁금증을 남기는 후킹으로 마무리한다.
+</output_contract>
+`.trim();
+
+const CAUSALITY_CONSTITUTION = `
+<causality_constitution>
+[Atomization Rule]
+- 사건을 A(상황/배경) -> B(발견/인지) -> C(행동/결과)로 분해해 서술한다.
+- A/B/C 각 단계에 심리, 감각, 결과 중 최소 2개 이상을 포함한다.
+- "결론 점프" 금지: A에서 바로 C로 건너뛰지 않는다.
+
+[Trigger Rule]
+- 각 문단은 다음 문단을 유발하는 트리거를 포함해야 한다.
+- "A가 일어났기 때문에 B를 느끼고, 그 느낌 때문에 C를 행동했다" 인과를 보이게 작성한다.
+- 트리거 없는 장면 전환/설명 덩어리 금지.
+
+[Reaction Rule]
+- 주요 사건에는 캐릭터 고유 리액션을 반드시 삽입한다.
+- 리액션은 캐릭터 성격/말투 DB와 일치해야 하며, 캐릭터 간 충돌/캐미를 드러내야 한다.
+</causality_constitution>
+`.trim();
+
+const STAGED_NARRATIVE_EXPANSION_GUIDE = `
+<staged_narrative_expansion_and_character_chemistry>
+[Rule 1: Anti-Compression Protocol]
+- 절대 결론부터 쓰지 마라. 사건은 반드시 단계적으로 전개한다.
+- 각 핵심 사건마다 아래 3단계를 모두 거친다:
+  1) 발단(감각과 인지): 시각/청각/후각 등 감각 단서를 최소 2문장 이상.
+  2) 심화(내부 필터링): 주인공의 직업적 본능/가치관으로 해석하는 독백.
+  3) 결과(행동과 반작용): 행동 + 상대가 받는 충격/오해를 구체 묘사.
+- A/B/C를 한 문장으로 압축 금지.
+
+[Rule 2: Reaction-Driven Chemistry]
+- 주인공의 행동(Action) 뒤에는 조연의 리액션(Reaction)을 반드시 붙여라.
+- 리액션은 캐릭터 DB의 성격/말투와 충돌하도록 구성하라.
+- 주인공의 현대적 표현(예: KPI, 재고, 마진 등)은 조연이 세계관 용어로 오해하는 과정을 묘사하라.
+- "알겠다" 식 단순 응답 금지. 당황/경악/의심/경외 중 최소 1개를 행동으로 보여줘라.
+
+[Rule 3: Trigger Logic]
+- 사건 B는 반드시 사건 A의 트리거에서 파생되어야 한다. 우연으로 덮지 마라.
+- 위기 해결 장면은 "기억 복기 -> 정보 대조 -> 논리 유추 -> 행동 결정" 과정을 최소 6문장 이상.
+- 새 아이템/세력 등장 시, 이전 회차 언급(복선)과의 연결 고리를 본문에 명시하라.
+
+[Rule 4: Showing Priority]
+- 감정 직접 서술 금지어: 피곤했다, 놀랐다, 기뻤다, 사랑했다.
+- 감정은 신체 변화, 호흡, 시선, 미세 동작으로 대체하라.
+</staged_narrative_expansion_and_character_chemistry>
+`.trim();
+
+function toStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  return [];
 }
 
-// ============================================================================
-// 프롬프트 동적 주입기 v10.0 (Style Evolution Engine 통합)
-// ============================================================================
-// V9.0 아키텍처 개편: "규칙 엔진(Rule Engine)에서 작가실(Writer's Room)로"
-//
-// 핵심 변경:
-// 1. 20,000토큰 헌법 → 1,000토큰 이하 3-Layer XML 구조로 압축
-// 2. 시놉시스 최상단 배치 (최우선 가중치)
-// 3. 메타 단어 원천 차단 (주인공, 히로인 등)
-// 4. 2-Step 파이프라인: Scene Plan → Prose Generate
-// ============================================================================
-
-// ============================================================================
-// Layer 0: 절대 규칙 (ABSOLUTE RULES)
-// ============================================================================
-// ============================================================================
-// V9.3: 장르 중립 시스템 프롬프트 - 프로젝트별 설정은 World Bible/Character DB에서 로드
-// ============================================================================
-const ABSOLUTE_RULES = `
-<absolute_rules>
-너는 상업 웹소설 작가다. 독자가 다음 화를 클릭하게 만드는 것이 유일한 목표다.
-
-★★★ 0. [시놉시스 절대 준수] ★★★
-   유저 프롬프트 최상단의 <episode_synopsis>에 적힌 씬 구성을 100% 따라야 한다.
-   시놉시스에 적힌 장소에서 시작해야 한다. 시놉시스에 없는 장면을 임의로 만들어내지 마라.
-   시놉시스의 씬 순서, 장소, 사건을 임의로 변경하지 마라.
-   시놉시스에 [씬1], [씬2], [씬3]... 이 있으면 모든 씬을 순서대로 포함해야 한다.
-
-1. [설정 엄수] 세계관/캐릭터 DB에 등록된 설정만 사용. DB에 없는 인물/조직/세력 창조 금지. (점소이, 상인 등 단순 엑스트라만 허용)
-2. [세계관 금지사항 준수] 세계관 설정의 [금지된 것] 목록을 반드시 지켜라.
-3. [금지어] 마크다운, 현대 외래어 사용 금지. 소설 본문 내에 '주인공', '히로인', '엑스트라', '시놉시스', '복선', '떡밥', '빌런', '조연' 같은 메타 단어 절대 사용 금지. (반드시 이름이나 대명사 '소년', '노인', '그', '여인' 등으로 지칭)
-4. [분량 규칙 - 절대 준수]
-   - 공백 포함 4,000자 이상 반드시 작성. 4,000자 미만은 실패로 간주.
-   - 시놉시스에 씬이 4개면 각 씬 최소 800자 이상 작성.
-   - 중간에 멈추지 마라. 마지막 씬까지 반드시 작성 완료 후 끝내라.
-   - 분량이 부족하면: 감각 묘사 추가, 동작을 프레임 단위로 분해, 대사 전후 행동 묘사 추가.
-   - 마지막은 다음 화를 읽고 싶게 만드는 장면(위기/발견/반전/충격적 선언)으로 끝내라.
-5. [설명 금지] 독자에게 직접 알려주지 마라.
-   - "~였다/~었다" 종결이 3문장 연속 오면 안 된다.
-   - "흥미로웠다", "이상했다", "거짓말이었다" 같은 감상/판정 서술 금지.
-   - "그는 알았다/느꼈다/깨달았다/직감했다" 직접 인지 서술 금지.
-   - 대신: 신체 반응, 행동, 감각, 대사로 보여줘라.
-6. [주인공은 행동한다] 매 화 최소 2번은 주인공이 스스로 선택하고 행동하는 장면이 있어야 한다.
-   끌려가기만 하고, 관찰하기만 하고, 생각하기만 하는 것은 소설이 아니라 설정집이다.
-7. [시놉시스 금지사항 — 절대 규칙]
-   시놉시스의 [금지] 또는 forbidden 항목은 에피소드 성공/실패를 결정하는 최우선 규칙이다.
-   금지된 단어, 이름, 장면은 어떤 상황에서도 출력하지 마라.
-   문맥상 필요해 보여도, 분위기상 어울려 보여도, 금지 항목은 절대 사용 금지.
-   금지사항 위반 = 에피소드 전체 실패. 처음부터 다시 작성해야 함.
-</absolute_rules>
-`;
-
-// ============================================================================
-// Layer 1: 문체 DNA (STYLE DNA)
-// V10.0: 동적 StyleDNA로 대체됨 - 아래는 Fallback용 기본 DNA
-// 프로젝트에 StyleDNA가 없을 때만 사용됨
-// ============================================================================
-const DEFAULT_STYLE_DNA_FALLBACK = `
-<style_dna>
-[서술 원칙]
-- Show, Don't Tell. 감정을 직접 쓰지 말고 '신체 반응'으로 보여줘라.
-- 대사 비율은 전체의 25% 이하.
-- 모든 씬에 '갈등(Conflict)'이나 '선택의 기로'가 있어야 한다. 밋밋한 이동이나 설명 씬 금지.
-
-[★★★ 문장 호흡 — 스타카토 금지, 복문 연결 필수 ★★★]
-같은 흐름의 동작/감각은 접속사(~하자, ~하며, ~하고, ~자마자)로 연결하여 호흡을 길게 가져가라.
-짧은 문장을 나열하는 '스타카토 문체'는 분량 늘리기 꼼수로 간주하여 금지한다.
-
-× (스타카토 — 금지):
-노인을 바닥에 눕혔다. 팔에서 힘이 빠졌다. 털썩 소리가 났다. 노인의 머리가 바닥에 부딪쳤다.
-
-○ (복문 연결 — 권장):
-노인을 바닥에 눕히자 팔에서 힘이 빠지며 털썩, 노인의 머리가 바닥에 부딪치는 둔탁한 소리가 울렸다.
-
-× (스타카토 — 금지):
-검을 뽑았다. 달려들었다. 베었다. 피가 튀었다.
-
-○ (복문 연결 — 권장):
-검을 뽑아 달려들며 베어내자 붉은 피가 허공에 선을 그었다.
-
-규칙:
-- 연속된 동작은 하나의 문장으로 묶어라 (2~3개 동작을 접속사로 연결)
-- 짧은 문장(1~3어절)이 3개 이상 연속되면 안 된다
-- 문장 하나에 감각(시각/청각/촉각) 묘사를 섞어 밀도를 높여라
-
-[★★★ 문단 구분 — 흐름이 바뀔 때만 빈 줄 ★★★]
-문단 사이 빈 줄은 '흐름의 전환'을 표시할 때만 사용한다. 무분별하게 넣지 마라.
-
-빈 줄을 넣는 경우:
-- 시선/초점이 바뀔 때 (인물A → 인물B)
-- 시간이 경과할 때 (잠시 후, 얼마 뒤)
-- 장소가 바뀔 때
-- 대사 앞뒤 (대사는 시각적으로 독립)
-- 분위기/템포가 급변할 때
-
-빈 줄을 넣지 않는 경우:
-- 같은 인물의 연속 동작
-- 같은 장면 내 묘사 연속
-- 원인→결과가 바로 이어질 때
-
-[문단 구성 예시]
-
-× (과도한 끊어쓰기 — 시처럼 보임):
-노인을 바닥에 눕혔다.
-
-팔에서 힘이 빠졌다.
-
-털썩 소리가 났다.
-
-○ (같은 흐름은 한 문단):
-노인을 바닥에 눕히자 팔에서 힘이 빠지며 털썩, 둔탁한 소리와 함께 노인의 머리가 바닥에 부딪쳤다. 축 늘어진 몸에서 미세한 호흡만이 느껴졌다.
-
-[대사 포매팅]
-대사(" ")는 앞뒤로 빈 줄을 넣어 시각적으로 독립시켜라.
-
-○ (대사 독립):
-노인이 고개를 들었다. 희미한 눈빛이 소년을 향했다.
-
-"누구냐."
-
-차갑고 낮은 목소리였다. 소년은 대답 대신 한 발 다가섰다.
-
-[Tell 금지 — 나쁜 예 vs 좋은 예]
-× "거짓말이었다. 그는 그것을 직감적으로 알았다."
-○ 그의 미소가 눈가에 닿지 않았다. 손가락 끝이 탁자를 두드리는 박자가 미묘하게 불규칙했다.
-
-× "흥미로운 일이었다."
-○ 입꼬리가 올라갔다. 이건 뭐지. 손을 쥐었다 폈다.
-
-× "그의 직감이 경고했다."
-○ 뒷목이 서늘했다. 온화한 미소 뒤에서 무언가가 꿈틀거렸다.
-
-× "전생에서 수많은 정치적 음모를 경험한 그였다."
-○ (쓰지 마라. 과거 경력을 직접 설명하지 마라. 행동으로 드러내라.)
-
-[감정 표현 강제]
-주인공에게 큰 일이 벌어졌을 때(회귀, 빙의, 위기 등), "신기했다/이상했다/흥미로웠다"로 퉁치지 마라.
-반드시 포함:
-- 신체 반응: 떨림, 구역질, 심장 박동, 식은땀, 호흡 변화
-- 감각 혼란: 시야 흔들림, 귀 울림, 냄새 왜곡
-- 즉각적 행동: 손으로 얼굴을 만짐, 벽을 짚음, 비명을 삼킴
-
-[대사 톤]
-캐릭터 DB의 speech_pattern을 따라라. 캐릭터별 말투가 지정되어 있으면 반드시 그 톤으로 대사를 작성하라.
-</style_dna>
-`;
-
-// ============================================================================
-// Layer 2: 이어쓰기 규칙 (2화 이상일 때만 동적 주입)
-// ============================================================================
-function getContinuityRule(episodeNumber: number): string {
-  if (episodeNumber <= 1) return '';
-  return `
-<continuity_rule>
-직전 화 마지막 장면에서 1초의 시간 건너뜀 없이 이어서 작성해라. 시간 점프나 뜬금없는 장소 전환으로 시작하지 마라.
-</continuity_rule>
-`;
+function resolveCurrentEpisodeSynopsis(
+  context: SlidingWindowContext,
+  targetEpisodeNumber: number
+) {
+  return (
+    context.episodeSynopses?.find((synopsis) => synopsis.isCurrent) ??
+    context.episodeSynopses?.find((synopsis) => synopsis.episodeNumber === targetEpisodeNumber)
+  );
 }
 
-// ============================================================================
-// 집필 파이프라인 지시문 (Scene Plan → Prose)
-// ============================================================================
-const WRITING_PIPELINE_DIRECTIVE = `
-<writing_pipeline>
-본문을 작성하기 전에, 반드시 아래 형식의 [Scene Plan]을 먼저 작성하고, 그 대본에 맞춰 [Prose]를 집필해라.
+function buildStoryBibleOverrideSection(
+  context: SlidingWindowContext,
+  targetEpisodeNumber: number
+): string {
+  const currentSynopsis = resolveCurrentEpisodeSynopsis(context, targetEpisodeNumber);
+  const warning =
+    '경고: 너의 사전 학습 지식(실제 역사, 클리셰 등)보다 아래 제공된 [스토리 바이블]이 무조건 우선한다. 시놉시스에 없는 인물, 시대적 배경을 임의로 창조하면 즉시 생성 실패로 간주한다.';
 
-[Scene Plan] 이번 화의 씬 구성을 계획해라. 각 씬에 반드시 포함:
+  if (!currentSynopsis) {
+    return [
+      '<story_bible_override>',
+      warning,
+      '[current_episode_synopsis]',
+      '현재 회차 시놉시스가 비어 있다. 기존 세계관/캐릭터/PD 지시사항만 사용해 작성하라.',
+      '</story_bible_override>',
+    ].join('\n');
+  }
 
-씬 N:
-- 장소/시간: (어디서, 언제)
-- 핵심 갈등: (주인공이 무엇과 부딪히는가 — "없음"은 불가)
-- 감정: (시작 감정 → 끝 감정)
-- 주인공의 행동/선택: (주인공이 무엇을 하는가 — "끌려간다/관찰한다"는 행동이 아님)
-- 독자의 감정: (이 씬에서 독자는 무엇을 느끼는가)
+  const lines: string[] = [
+    '<story_bible_override>',
+    warning,
+    `episode_number: ${currentSynopsis.episodeNumber}`,
+  ];
 
-규칙:
-- 최소 3개 씬, 최대 5개 씬
-- 매 씬에 갈등이 있어야 한다 (외부 갈등 또는 내면 갈등)
-- 주인공이 "생각만 하는" 씬은 1개 이하
-- 마지막 씬은 반드시 절단신공 (위기/발견/반전/선언)
+  if (currentSynopsis.title) {
+    lines.push(`title: ${currentSynopsis.title}`);
+  }
 
-[Prose] 문단 구성 비율 — 반드시 지켜라:
-- 장면 묘사(감각+행동): 50% 이상 (2,000자 이상)
-- 대사+대사 전후 행동: 25% (1,000자)
-- 내면 독백/심리: 15% 이하 (600자 이하)
-- 직접 설명/배경 해설: 10% 이하 (400자 이하)
+  lines.push('[current_episode_synopsis]');
+  lines.push(currentSynopsis.synopsis);
 
-"~였다/~었다"로 끝나는 설명문이 전체의 30%를 넘으면 실패다.
+  if (currentSynopsis.keyEvents?.length) {
+    lines.push('[key_events]');
+    currentSynopsis.keyEvents.forEach((event, index) => {
+      lines.push(`${index + 1}. ${event}`);
+    });
+  }
 
-★★★ [분량 필수] ★★★
-- 소설 본문 4,000자 이상 반드시 작성. 4,000자 미만은 미완성으로 간주.
-- 각 씬 최소 800자 이상 작성해야 한다.
-- 분량이 부족하면: 감각 묘사 추가, 동작을 프레임 단위로 분해해라.
-- 모든 씬을 완료한 후에만 끝내라. 중간에 멈추지 마라.
-- Scene Plan의 내용 외의 메타 텍스트는 출력하지 말 것.
-</writing_pipeline>
-`;
+  if (currentSynopsis.foreshadowing?.length) {
+    lines.push('[foreshadowing]');
+    currentSynopsis.foreshadowing.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item}`);
+    });
+  }
 
-// ============================================================================
-// 컴팩트 캐릭터 섹션 빌더
-// ============================================================================
+  if (currentSynopsis.callbacks?.length) {
+    lines.push('[callbacks]');
+    currentSynopsis.callbacks.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item}`);
+    });
+  }
+
+  if (currentSynopsis.forbidden) {
+    lines.push('[forbidden]');
+    lines.push(currentSynopsis.forbidden);
+  }
+
+  lines.push('</story_bible_override>');
+  return lines.join('\n');
+}
+
+export function buildMemoryLogSection(context: SlidingWindowContext): string {
+  const recentLogs = context.recentLogs
+    .slice(0, 5)
+    .map((log) => `- ${log.episodeNumber}화: ${log.summary}`)
+    .join('\n');
+
+  const unresolvedHooks = context.unresolvedHooks
+    .slice(0, 8)
+    .map((hook) => `- [중요도 ${hook.importance}] ${hook.summary}`)
+    .join('\n');
+
+  return [
+    '<memory_log>',
+    '[recent_episode_flow]',
+    recentLogs || '- 없음',
+    '[unresolved_hooks]',
+    unresolvedHooks || '- 없음',
+    '</memory_log>',
+  ].join('\n');
+}
+
+function scoreHookForEpisode(
+  hook: { importance: number; createdInEpisodeNumber: number },
+  targetEpisodeNumber: number
+): number {
+  const distance = Math.max(0, targetEpisodeNumber - hook.createdInEpisodeNumber);
+  return hook.importance * 100 - distance * 5 + hook.createdInEpisodeNumber * 0.01;
+}
+
+function buildDynamicMemoryLogSection(
+  context: SlidingWindowContext,
+  targetEpisodeNumber: number
+): string {
+  const currentSynopsis = resolveCurrentEpisodeSynopsis(context, targetEpisodeNumber);
+
+  const recentLogs = context.recentLogs
+    .slice(0, 5)
+    .map((log) => `- ${log.episodeNumber}?? ${log.summary}`)
+    .join('\n');
+
+  const unresolvedHooks = [...context.unresolvedHooks]
+    .sort(
+      (a, b) =>
+        scoreHookForEpisode(b, targetEpisodeNumber) -
+        scoreHookForEpisode(a, targetEpisodeNumber)
+    )
+    .slice(0, 8)
+    .map(
+      (hook) =>
+        `- [created:${hook.createdInEpisodeNumber} | importance:${hook.importance}] ${hook.summary}`
+    )
+    .join('\n');
+
+  const foreshadowingFocus = toStringList(currentSynopsis?.foreshadowing)
+    .slice(0, 6)
+    .map((item, index) => `${index + 1}. ${item}`)
+    .join('\n');
+
+  const callbackFocus = toStringList(currentSynopsis?.callbacks)
+    .slice(0, 6)
+    .map((item, index) => `${index + 1}. ${item}`)
+    .join('\n');
+
+  return [
+    '<memory_log>',
+    '[recent_episode_flow]',
+    recentLogs || '- ?놁쓬',
+    '[unresolved_hooks]',
+    unresolvedHooks || '- ?놁쓬',
+    '[episode_hook_focus.foreshadowing]',
+    foreshadowingFocus || '- ?놁쓬',
+    '[episode_hook_focus.callbacks]',
+    callbackFocus || '- ?놁쓬',
+    '</memory_log>',
+  ].join('\n');
+}
+
 export function buildCompactCharacterSection(characters: ActiveCharacter[]): string {
-  if (!characters || characters.length === 0) return '';
+  if (!characters?.length) {
+    return '<characters>\n- 등록된 캐릭터 없음\n</characters>';
+  }
 
-  const compactChars = characters
-    .filter(c => c.role === 'protagonist' || c.role === 'antagonist' || c.role === 'supporting')
-    .slice(0, 5) // 최대 5명
-    .map(c => {
-      const roleLabel = c.role === 'protagonist' ? '주인공' :
-                       c.role === 'antagonist' ? '빌런' : '조연';
-      const status = [
-        c.currentLocation ? `위치:${c.currentLocation}` : '',
-        c.emotionalState ? `감정:${c.emotionalState}` : '',
-      ].filter(Boolean).join(', ');
-
-      // ★★★ V9.3: 말투(speech_pattern) 추가 ★★★
-      const speechInfo = c.speechPattern ? ` / 말투: ${c.speechPattern.substring(0, 40)}` : '';
-
-      return `- ${c.name} [${roleLabel}]: ${c.personality?.substring(0, 30) || '성격 미설정'}${speechInfo} ${status ? `(${status})` : ''}`;
+  const lines = characters
+    .slice(0, 20)
+    .map((character) => {
+      const role = character.role || 'unknown';
+      const location = character.currentLocation || '미상';
+      const emotion = character.emotionalState || '미상';
+      const speech = character.speechPattern ? ` | 말투:${character.speechPattern}` : '';
+      return `- ${character.name} [${role}] | 위치:${location} | 감정:${emotion}${speech}`;
     })
     .join('\n');
 
-  return `
-<characters>
-이번 화 등장인물 (DB에 없는 인물 창조 금지):
-${compactChars}
-</characters>
-`;
+  return `<characters>\n${lines}\n</characters>`;
 }
 
-// ============================================================================
-// 컴팩트 세계관 섹션 빌더 - V9.3 forbidden_elements 강화
-// ============================================================================
 export function buildCompactWorldSection(worldBible: SlidingWindowContext['worldBible']): string {
-  if (!worldBible) return '';
+  if (!worldBible) {
+    return '<world_bible>\n- 세계관 정보 없음\n</world_bible>';
+  }
 
-  const rules = Array.isArray(worldBible.absolute_rules)
-    ? worldBible.absolute_rules.slice(0, 5).join('\n  - ')
-    : typeof worldBible.absolute_rules === 'string'
-      ? worldBible.absolute_rules.substring(0, 200)
-      : '';
+  const absoluteRules = toStringList(
+    (worldBible as { absolute_rules?: unknown }).absolute_rules
+  ).slice(0, 10);
+  const forbidden = toStringList(
+    (worldBible as { forbidden_elements?: unknown }).forbidden_elements
+  ).slice(0, 10);
 
-  // ★★★ V9.3: forbidden_elements 전체 표시 (장르 규칙의 핵심) ★★★
-  const forbidden = worldBible.forbidden_elements?.length
-    ? worldBible.forbidden_elements.map((f: string) => `  ❌ ${f}`).join('\n')
-    : '  (없음)';
-
-  return `
-<world_bible>
-[세계관 기본]
-- 세계: ${worldBible.world_name || '미설정'}
-- 시대: ${worldBible.time_period || '미설정'}
-- 힘의 체계: ${worldBible.power_system_name || '없음'}
-
-[세계관 절대 규칙]
-  - ${rules || '없음'}
-
-[이 세계에서 금지된 것 — 반드시 지켜라]
-${forbidden}
-</world_bible>
-`;
+  const lines: string[] = ['<world_bible>'];
+  lines.push(`- world_name: ${(worldBible as { world_name?: string | null }).world_name || '미설정'}`);
+  lines.push(`- time_period: ${(worldBible as { time_period?: string | null }).time_period || '미설정'}`);
+  lines.push(
+    `- power_system: ${(worldBible as { power_system_name?: string | null }).power_system_name || '미설정'}`
+  );
+  lines.push('[absolute_rules]');
+  lines.push(...(absoluteRules.length ? absoluteRules.map((rule) => `- ${rule}`) : ['- 없음']));
+  lines.push('[forbidden_elements]');
+  lines.push(...(forbidden.length ? forbidden.map((item) => `- ${item}`) : ['- 없음']));
+  lines.push('</world_bible>');
+  return lines.join('\n');
 }
 
-// ============================================================================
-// 시놉시스 섹션 빌더 (최상단 배치용) - V9.0.3 isCurrent fallback 추가
-// ============================================================================
 export function buildSynopsisSection(
   context: SlidingWindowContext,
   targetEpisodeNumber?: number
 ): string {
-  // 1차: isCurrent로 찾기
-  let currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
-
-  // 2차 Fallback: episodeNumber로 직접 매칭
-  if (!currentSynopsis && targetEpisodeNumber && context.episodeSynopses) {
-    currentSynopsis = context.episodeSynopses.find(
-      s => s.episodeNumber === targetEpisodeNumber
-    );
-    if (currentSynopsis) {
-      console.log('[SYNOPSIS-DEBUG] isCurrent fallback 사용:', {
-        targetEpisodeNumber,
-        foundEpisode: currentSynopsis.episodeNumber,
-      });
-    }
-  }
-
-  // 디버깅 로그 (V9.0.3 강화)
-  console.log('[SYNOPSIS-DEBUG] buildSynopsisSection 호출:', {
-    hasSynopses: !!context.episodeSynopses,
-    synopsesCount: context.episodeSynopses?.length || 0,
-    targetEpisodeNumber,
-    allEpisodeNumbers: context.episodeSynopses?.map(s => s.episodeNumber) || [],
-    currentFound: !!currentSynopsis,
-    currentEpisode: currentSynopsis?.episodeNumber,
-    synopsisPreview: currentSynopsis?.synopsis?.substring(0, 80) || 'NONE',
-  });
+  const currentSynopsis = targetEpisodeNumber
+    ? resolveCurrentEpisodeSynopsis(context, targetEpisodeNumber)
+    : context.episodeSynopses?.find((synopsis) => synopsis.isCurrent);
 
   if (!currentSynopsis) {
-    console.error('[CRITICAL] ★★★ 현재 회차 시놉시스를 찾을 수 없음! Story Bible 확인 필요 ★★★');
-    return `
-<episode_synopsis>
-[⚠️ 시놉시스 없음] PD 지시사항을 따라 자유롭게 작성하되, 절대 규칙은 반드시 준수할 것.
-</episode_synopsis>
-`;
+    return [
+      '<episode_synopsis>',
+      '- 현재 회차 시놉시스 없음',
+      '</episode_synopsis>',
+    ].join('\n');
   }
 
-  const parts: string[] = [];
-
-  // ★★★ V9.3: 시놉시스 강제 (장르 중립) ★★★
-  parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
-  parts.push(`║  🚨🚨🚨 [절대 명령] 시놉시스가 왕이다 - 아래 대본을 100% 따라 써라 🚨🚨🚨   ║`);
-  parts.push(`║  시놉시스에 적힌 장소에서 시작하라. 임의 변경 = 실패                       ║`);
-  parts.push(`║  시놉시스에 [씬1]~[씬N]이 있으면 모든 씬을 순서대로 포함하라              ║`);
-  parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
-  parts.push(``);
-
-  // ★★★ V9.1: 세계관 1줄 요약 (장르 오염 방지) ★★★
-  if (context.worldBible) {
-    const wb = context.worldBible;
-    let worldLine = `[세계관]`;
-    if (wb.world_name) worldLine += ` ${wb.world_name}`;
-    if (wb.time_period) worldLine += ` — ${wb.time_period}`;
-    if (wb.power_system_name) worldLine += ` / 힘의 체계: ${wb.power_system_name}`;
-    parts.push(worldLine);
-    parts.push(``);
-  }
-
-  parts.push(`<episode_synopsis episode="${currentSynopsis.episodeNumber}">`);
-  parts.push(`[${currentSynopsis.episodeNumber}화 시놉시스 - 반드시 이 내용대로 작성]`);
+  const lines: string[] = [`<episode_synopsis episode="${currentSynopsis.episodeNumber}">`];
 
   if (currentSynopsis.title) {
-    parts.push(`제목: ${currentSynopsis.title}`);
+    lines.push(`title: ${currentSynopsis.title}`);
   }
+  lines.push('synopsis:');
+  lines.push(currentSynopsis.synopsis);
 
-  // ★★★ V9.5: forbidden을 시놉시스 본문보다 먼저 배치 (최우선 강조) ★★★
-  if (currentSynopsis.forbidden) {
-    parts.push(``);
-    parts.push(`⛔⛔⛔ [이번 화 금지사항 — 위반 시 에피소드 실패] ⛔⛔⛔`);
-    // forbidden이 여러 줄일 수 있으므로 줄바꿈으로 분리
-    const forbiddenLines = currentSynopsis.forbidden.split('\n').filter((l: string) => l.trim());
-    forbiddenLines.forEach((line: string) => {
-      parts.push(`❌ ${line.trim()}`);
+  if (currentSynopsis.goals?.length) {
+    lines.push('goals:');
+    currentSynopsis.goals.forEach((goal, index) => {
+      lines.push(`${index + 1}. ${goal}`);
     });
-    parts.push(`⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔⛔`);
-    parts.push(``);
   }
 
-  // ★★★ 핵심 시놉시스 (가장 중요) ★★★
-  parts.push(``);
-  parts.push(`★★★ 핵심 시놉시스 (이 내용을 그대로 소설화하라):`);
-  parts.push(`${currentSynopsis.synopsis}`);
-  parts.push(``);
+  if (currentSynopsis.keyEvents?.length) {
+    lines.push('key_events:');
+    currentSynopsis.keyEvents.forEach((event, index) => {
+      lines.push(`${index + 1}. ${event}`);
+    });
+  }
+
+  if (currentSynopsis.foreshadowing?.length) {
+    lines.push('foreshadowing:');
+    currentSynopsis.foreshadowing.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item}`);
+    });
+  }
+
+  if (currentSynopsis.callbacks?.length) {
+    lines.push('callbacks:');
+    currentSynopsis.callbacks.forEach((item, index) => {
+      lines.push(`${index + 1}. ${item}`);
+    });
+  }
 
   if (currentSynopsis.sceneBeats) {
-    parts.push(`★★★ 씬 대본 (이 순서대로 작성):`);
-    parts.push(`${currentSynopsis.sceneBeats}`);
-    parts.push(``);
+    lines.push('scene_beats:');
+    lines.push(currentSynopsis.sceneBeats);
   }
 
-  if (currentSynopsis.goals && currentSynopsis.goals.length > 0) {
-    parts.push(`★ 이번 화 목표: ${currentSynopsis.goals.join(' / ')}`);
+  if (currentSynopsis.forbidden) {
+    lines.push('forbidden:');
+    lines.push(currentSynopsis.forbidden);
   }
 
-  if (currentSynopsis.keyEvents && currentSynopsis.keyEvents.length > 0) {
-    parts.push(`★ 핵심 사건 순서: ${currentSynopsis.keyEvents.join(' → ')}`);
-  }
-
-  // V9.0 신규 필드
-  if (currentSynopsis.emotionCurve) {
-    parts.push(`감정 곡선: ${currentSynopsis.emotionCurve}`);
-  }
-
-  if (currentSynopsis.endingImage) {
-    parts.push(`★ 마지막 장면 이미지: ${currentSynopsis.endingImage}`);
-  }
-
-  // forbidden은 이미 시놉시스 본문 앞에 배치됨 (V9.5)
-
-  if (currentSynopsis.foreshadowing && currentSynopsis.foreshadowing.length > 0) {
-    parts.push(`깔 복선: ${currentSynopsis.foreshadowing.join(', ')}`);
-  }
-
-  if (currentSynopsis.callbacks && currentSynopsis.callbacks.length > 0) {
-    parts.push(`회수할 복선: ${currentSynopsis.callbacks.join(', ')}`);
-  }
-
-  parts.push(`</episode_synopsis>`);
-  parts.push(``);
-  parts.push(`╔═══════════════════════════════════════════════════════════════════════════════╗`);
-  parts.push(`║  ⚠️ 위 시놉시스의 장소, 사건, 순서를 절대 변경하지 마라                      ║`);
-  parts.push(`║  시놉시스에 없는 장면을 임의로 추가하지 마라                                 ║`);
-  parts.push(`╠═══════════════════════════════════════════════════════════════════════════════╣`);
-  parts.push(`║  ★ [씬 강제 규칙] 시놉시스에 [씬1], [씬2], [씬3]... 이 있으면:              ║`);
-  parts.push(`║    - 모든 씬을 순서대로 포함해야 한다. 어떤 씬도 건너뛰지 마라.             ║`);
-  parts.push(`║    - 각 씬은 최소 600자 이상 작성해야 한다.                                  ║`);
-  parts.push(`║    - "금지" 또는 "forbidden" 항목의 용어는 이 화에서 절대 사용하지 마라.    ║`);
-  parts.push(`╚═══════════════════════════════════════════════════════════════════════════════╝`);
-
-  return parts.join('\n');
+  lines.push('</episode_synopsis>');
+  return lines.join('\n');
 }
 
-// ============================================================================
-// 직전 회차 엔딩 섹션 빌더 (800자로 축소) + Fallback 로직
-// ============================================================================
+function normalizeName(value: string): string {
+  return value.replace(/\s+/g, '').trim();
+}
+
+export function buildEpisodeCharacterGateSection(
+  context: SlidingWindowContext,
+  targetEpisodeNumber: number
+): string {
+  const currentSynopsis = resolveCurrentEpisodeSynopsis(context, targetEpisodeNumber);
+  const allowed = toStringList(currentSynopsis?.featuredCharacters)
+    .map(normalizeName)
+    .filter(Boolean);
+
+  if (!allowed.length) {
+    return '';
+  }
+
+  const strictEpisodeOpening = targetEpisodeNumber <= 2;
+
+  const lines: string[] = ['<episode_character_gate>'];
+  lines.push(`episode: ${targetEpisodeNumber}`);
+  lines.push('[allowed_characters]');
+  allowed.forEach((name, index) => {
+    lines.push(`${index + 1}. ${name}`);
+  });
+  lines.push('[hard_rules]');
+  lines.push('- Only allowed characters may appear with direct action or dialogue in this episode.');
+  lines.push('- Do not physically 등장시키다 any out-of-list named character.');
+  lines.push('- If mention is unavoidable, keep it as rumor/background reference only.');
+  if (strictEpisodeOpening) {
+    lines.push('- Episode opening phase must be extra strict: no cameo entry outside allowed list.');
+  }
+  lines.push('</episode_character_gate>');
+  return lines.join('\n');
+}
+
 export function buildPreviousEndingSection(context: SlidingWindowContext): string {
-  // previousEpisodeEnding이 있으면 사용
-  if (context.previousEpisodeEnding) {
-    const ending = context.previousEpisodeEnding.slice(-800);
-    return `
-<previous_ending>
-[직전 화 마지막 장면 - 여기서 바로 이어서 작성]
-${ending}
-</previous_ending>
-`;
-  }
+  const ending =
+    context.previousEpisodeEnding?.trim() ||
+    context.recentLogs[0]?.last500Chars?.trim() ||
+    '';
 
-  // Fallback: recentLogs에서 last500Chars 또는 summary 사용
-  if (context.recentLogs && context.recentLogs.length > 0) {
-    const lastLog = context.recentLogs[0];
-    const fallbackEnding = lastLog.last500Chars || lastLog.summary;
-
-    if (fallbackEnding) {
-      console.warn('[V9.0.1] previousEpisodeEnding 누락, recentLogs fallback 사용');
-      return `
-<previous_ending>
-[직전 화 마지막 장면 (fallback) - 여기서 바로 이어서 작성]
-${fallbackEnding.slice(-800)}
-</previous_ending>
-`;
-    }
-  }
-
-  console.error('[CRITICAL] 2화 이상인데 직전 화 엔딩이 없음! 연속성 문제 발생 가능');
-  return '';
-}
-
-// ============================================================================
-// 직전 회차 요약 섹션 빌더 (200자 이내)
-// ============================================================================
-export function buildPreviousSummarySection(context: SlidingWindowContext): string {
-  if (!context.recentLogs || context.recentLogs.length === 0) return '';
-
-  const lastLog = context.recentLogs[0];
-  const summary = lastLog.summary.substring(0, 200);
-
-  return `
-<previous_summary>
-[${lastLog.episodeNumber}화 요약] ${summary}${lastLog.summary.length > 200 ? '...' : ''}
-</previous_summary>
-`;
-}
-
-// ============================================================================
-// V9.0 시스템 프롬프트 빌더
-// ============================================================================
-// ============================================================================
-// V10.0 시스템 프롬프트 빌더 (동적 StyleDNA 지원)
-// ============================================================================
-export async function buildSystemPromptV9(
-  targetEpisodeNumber: number,
-  projectId?: string
-): Promise<string> {
-  const writingMemoryPrompt = buildWritingMemoryPrompt();
-
-  // 동적 StyleDNA 로드 (projectId가 있으면)
-  let styleDNA: string;
-  if (projectId) {
-    try {
-      styleDNA = await buildDynamicStyleDNA(projectId);
-      console.log('[PromptInjector] 동적 StyleDNA 로드 완료');
-    } catch (error) {
-      console.warn('[PromptInjector] 동적 StyleDNA 로드 실패, 기본 DNA 사용:', error);
-      styleDNA = getDefaultStyleDNA();
-    }
-  } else {
-    // projectId가 없으면 기본 DNA 사용
-    styleDNA = getDefaultStyleDNA();
-  }
+  if (!ending) return '';
 
   return [
-    ABSOLUTE_RULES,
-    styleDNA,
-    getContinuityRule(targetEpisodeNumber),
-    writingMemoryPrompt,
-  ].filter(Boolean).join('\n');
+    '<previous_ending>',
+    '[직전 화 마지막 장면]',
+    ending.slice(-900),
+    '</previous_ending>',
+  ].join('\n');
 }
 
-// ============================================================================
-// V9.0.3 유저 프롬프트 빌더 - 시놉시스 최우선 배치 강화
-// ============================================================================
+export function buildPreviousSummarySection(context: SlidingWindowContext): string {
+  const previous = context.recentLogs[0];
+  if (!previous) return '';
+
+  return [
+    '<previous_summary>',
+    `${previous.episodeNumber}화 요약: ${previous.summary.slice(0, 280)}`,
+    '</previous_summary>',
+  ].join('\n');
+}
+
+export function buildTransitionContractSection(context: SlidingWindowContext): string {
+  const contract = context.transitionContract;
+  if (!contract) return '';
+
+  return [
+    '<transition_contract>',
+    `source_episode: ${contract.sourceEpisodeNumber}`,
+    `target_episode: ${contract.targetEpisodeNumber}`,
+    '[anchor_1]',
+    contract.anchor1 || '-',
+    '[anchor_2]',
+    contract.anchor2 || '-',
+    '[anchor_3]',
+    contract.anchor3 || '-',
+    '[opening_guardrail]',
+    contract.openingGuardrail || '직전 화 마지막 장면의 장소/감정/행동 결과를 즉시 이어라.',
+    '</transition_contract>',
+  ].join('\n');
+}
+
+export function buildCharacterSnapshotSection(context: SlidingWindowContext): string {
+  const snapshots = context.previousCharacterSnapshots || [];
+  if (!snapshots.length) return '';
+
+  const rows = snapshots
+    .slice(0, 12)
+    .map(
+      (item) =>
+        `- ${item.name} | role:${item.role || 'unknown'} | location:${item.location || 'unknown'} | emotion:${item.emotionalState || 'unknown'}`
+    )
+    .join('\n');
+
+  return [
+    '<previous_character_snapshots>',
+    rows,
+    '</previous_character_snapshots>',
+  ].join('\n');
+}
+
+export function buildCausalityContractSection(): string {
+  return [
+    '<causal_scene_contract>',
+    '각 핵심 사건은 최소 3문장 이상으로 전개한다.',
+    '문장 구조: A(상황) -> Trigger -> B(인지/감각/독백) -> Trigger -> C(행동/결과).',
+    'A/B/C를 한 문장으로 뭉개지 말고, 각 단계 사이 인과를 분명하게 드러낸다.',
+    '중요: 사건을 요약하지 말고, 단계별 징검다리를 모두 밟아라.',
+    '[anti_compression_protocol]',
+    '핵심 사건은 발단(감각) -> 심화(내적 해석) -> 결과(행동+반작용) 3단계를 반드시 거쳐라.',
+    'A/B/C를 한 문장으로 압축하지 마라.',
+    '[reaction_rule]',
+    '주인공 행동 뒤에는 상대의 오해/경악/의심 리액션을 붙여 캐릭터 케미를 만든다.',
+    '[trigger_rule]',
+    '다음 문단은 반드시 직전 문단의 트리거로 이어져야 하며, 우연 전개를 금지한다.',
+    '</causal_scene_contract>',
+  ].join('\n');
+}
+
+export async function buildSystemPromptV9(
+  targetEpisodeNumber: number,
+  _projectId?: string
+): Promise<string> {
+  const continuityRule =
+    targetEpisodeNumber > 1
+      ? '<continuity_rule>\n직전 화 감정선과 사건선을 바로 이어서 시작한다.\n</continuity_rule>'
+      : '';
+
+  return [WRITER_PERSONA, CORE_CONSTITUTION, continuityRule, OUTPUT_CONTRACT]
+    .concat(CAUSALITY_CONSTITUTION, STAGED_NARRATIVE_EXPANSION_GUIDE)
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export function buildUserPromptV9(
   context: SlidingWindowContext,
   userInstruction: string,
   targetEpisodeNumber: number
 ): string {
   const sections: string[] = [];
+  sections.push(buildStoryBibleOverrideSection(context, targetEpisodeNumber));
 
-  // ★★★ 0. 시놉시스 (절대 최상단 - 프롬프트의 첫 번째 내용) ★★★
-  const synopsisSection = buildSynopsisSection(context, targetEpisodeNumber);
-  sections.push(synopsisSection);
-
-  // 디버깅 로그
-  console.log('[PROMPT-DEBUG] 시놉시스 섹션 길이:', synopsisSection.length);
-  console.log('[PROMPT-DEBUG] 시놉시스 섹션 처음 200자:', synopsisSection.substring(0, 200));
-
-  // 1. PD 지시사항
-  sections.push(`
-<pd_instruction>
-${targetEpisodeNumber}화 작성 요청:
-${userInstruction}
-</pd_instruction>
-`);
-
-  // 2. 직전 화 엔딩 (800자) - 이어쓰기용
   if (targetEpisodeNumber > 1) {
-    sections.push(buildPreviousEndingSection(context));
+    const previousEnding = buildPreviousEndingSection(context);
+    if (previousEnding) sections.push(previousEnding);
   }
-
-  // 3. 등장인물 (컴팩트)
+  sections.push(buildTransitionContractSection(context));
+  sections.push(buildCharacterSnapshotSection(context));
+  sections.push(buildCausalityContractSection());
+  sections.push(buildSynopsisSection(context, targetEpisodeNumber));
+  sections.push(buildEpisodeCharacterGateSection(context, targetEpisodeNumber));
+  sections.push(buildDynamicMemoryLogSection(context, targetEpisodeNumber));
+  sections.push(buildCompactWorldSection(context.worldBible));
   sections.push(buildCompactCharacterSection(context.activeCharacters));
 
-  // 4. 세계관 (컴팩트)
-  sections.push(buildCompactWorldSection(context.worldBible));
-
-  // 5. 직전 회차 요약 (200자)
   if (targetEpisodeNumber > 1) {
-    sections.push(buildPreviousSummarySection(context));
+    const previousSummary = buildPreviousSummarySection(context);
+    if (previousSummary) sections.push(previousSummary);
   }
 
-  // 6. 집필 파이프라인 지시문
-  sections.push(WRITING_PIPELINE_DIRECTIVE);
+  sections.push(
+    [
+      '<pd_instruction>',
+      userInstruction?.trim() || 'PD 지시사항 없음. 시놉시스와 연속성 중심으로 집필하라.',
+      '</pd_instruction>',
+    ].join('\n')
+  );
 
-  // 7. 분량 및 비율 강조 (V9.4 강화)
-  sections.push(`
-<output_format>
-- [Scene Plan] 작성 후 [Prose]에 본문 작성
-- ★★★ 분량: 공백 포함 4,000자 이상 필수. 4,000자 미만 = 실패 ★★★
-- 각 씬 최소 800자 이상. 씬이 4개면 800자 x 4 = 3,200자 + 전환/여백 = 4,000자+
-- 장면 묘사 50% 이상, 대사 25%, 심리 15% 이하, 설명 10% 이하
-- "~였다/~었다" 설명문 30% 이하
-- 주인공의 능동적 행동/선택 2회 이상
-- 마지막: 반드시 절단신공으로 끝낼 것
-- 중간에 멈추지 마라. 모든 씬을 완료한 후에만 끝내라.
-</output_format>
-`);
+  sections.push(
+    [
+      '<final_execution_directive>',
+      '시놉시스와 세계관을 우선하며, 스타카토 금지 + Show, Don\'t Tell 원칙으로 4,000~6,000자 본문을 작성하라.',
+      '</final_execution_directive>',
+    ].join('\n')
+  );
 
-  // ★★★ 8. V9.0.3: 시놉시스 최종 리마인더 (프롬프트 끝에 다시 강조) ★★★
-  // isCurrent fallback 적용
-  let currentSynopsis = context.episodeSynopses?.find(s => s.isCurrent);
-  if (!currentSynopsis && context.episodeSynopses) {
-    currentSynopsis = context.episodeSynopses.find(s => s.episodeNumber === targetEpisodeNumber);
-  }
-
-  if (currentSynopsis) {
-    const firstScene = currentSynopsis.sceneBeats?.split('\n')[0] ||
-                       currentSynopsis.keyEvents?.[0] ||
-                       currentSynopsis.synopsis?.substring(0, 80) || '';
-    sections.push(`
-╔═══════════════════════════════════════════════════════════════════════════════╗
-║  🚨 [최종 확인] ${targetEpisodeNumber}화 집필 시작                                            ║
-╚═══════════════════════════════════════════════════════════════════════════════╝
-
-다시 한번 확인: 위 <episode_synopsis>에 적힌 내용을 100% 따라 작성하라.
-
-첫 번째 씬: "${firstScene}"
-→ 이 씬부터 시작하라. 시놉시스에 없는 장면을 임의로 추가하지 마라.
-
-시놉시스 = 왕. AI 작가 = 시놉시스를 소설화하는 집행자.
-`);
-  } else {
-    console.error('[PROMPT-DEBUG] ⚠️ 최종 리마인더 생성 불가 - 시놉시스 없음');
-  }
-
-  // ★★★ V9.4: 분량 최종 리마인더 (프롬프트 맨 끝) ★★★
-  sections.push(`
-[분량 필수 - 이것을 지키지 않으면 실패]
-✓ 공백 포함 4,000자 이상 작성할 것
-✓ 각 씬 최소 800자 이상
-✓ 모든 씬을 완료한 후에만 끝낼 것
-✓ 분량이 부족하면: 감각 묘사 추가, 동작을 프레임 단위로 분해, 대사 전후 행동 묘사 추가
-`);
-
-  const finalPrompt = sections.filter(Boolean).join('\n');
-
-  // 최종 프롬프트 디버깅
-  console.log('[PROMPT-DEBUG] 최종 유저 프롬프트 구성:', {
-    totalLength: finalPrompt.length,
-    hasSynopsis: finalPrompt.includes('<episode_synopsis'),
-    hasReminder: finalPrompt.includes('최종 확인'),
-    first100Chars: finalPrompt.substring(0, 100),
+  const prompt = sections.filter(Boolean).join('\n\n');
+  console.log('[PromptInjector] Prompt assembled:', {
+    targetEpisodeNumber,
+    startsWithStoryBibleOverride: prompt.startsWith('<story_bible_override>'),
+    hasSynopsis: prompt.includes('<episode_synopsis'),
+    recentLogCount: context.recentLogs.length,
   });
-
-  return finalPrompt;
+  return prompt;
 }
 
-// ============================================================================
-// V9.0.3 에피소드 생성 프롬프트 조립 (메인 함수)
-// ============================================================================
-// ============================================================================
-// V10.0 에피소드 생성 프롬프트 조립 (메인 함수) - 동적 StyleDNA 지원
-// ============================================================================
 export async function buildEpisodeGenerationPrompts(
   context: SlidingWindowContext,
   userInstruction: string,
   targetEpisodeNumber: number,
-  projectId?: string  // V10.0: 동적 StyleDNA 로드용
+  projectId?: string
 ): Promise<{ systemPrompt: string; userPrompt: string }> {
-  // ★★★ V9.0.3: 시놉시스 디버깅 강화 ★★★
-  const synopsesInfo = context.episodeSynopses || [];
-  const currentByFlag = synopsesInfo.find(s => s.isCurrent);
-  const currentByNumber = synopsesInfo.find(s => s.episodeNumber === targetEpisodeNumber);
+  const effectiveProjectId =
+    projectId ||
+    (context.worldBible as { project_id?: string | null })?.project_id ||
+    undefined;
 
-  console.log('[SYNOPSIS-DEBUG] ===== 프롬프트 생성 시작 =====');
-  console.log('[SYNOPSIS-DEBUG] targetEpisodeNumber:', targetEpisodeNumber);
-  console.log('[SYNOPSIS-DEBUG] 시놉시스 배열 길이:', synopsesInfo.length);
-  console.log('[SYNOPSIS-DEBUG] 시놉시스 에피소드 목록:', synopsesInfo.map(s => s.episodeNumber));
-  console.log('[SYNOPSIS-DEBUG] isCurrent로 찾음:', !!currentByFlag, currentByFlag?.episodeNumber);
-  console.log('[SYNOPSIS-DEBUG] episodeNumber로 찾음:', !!currentByNumber, currentByNumber?.episodeNumber);
-
-  if (currentByFlag || currentByNumber) {
-    const syn = currentByFlag || currentByNumber;
-    console.log('[SYNOPSIS-DEBUG] ✅ 시놉시스 발견:', {
-      episodeNumber: syn?.episodeNumber,
-      title: syn?.title,
-      synopsisLength: syn?.synopsis?.length,
-      synopsisPreview: syn?.synopsis?.substring(0, 100),
-      hasSceneBeats: !!syn?.sceneBeats,
-      sceneBeatsPreview: syn?.sceneBeats?.substring(0, 100),
-    });
-  } else {
-    console.error('[SYNOPSIS-DEBUG] ❌ 시놉시스를 찾을 수 없음!');
-  }
-
-  // 컨텍스트 로딩 로그
-  console.log('[PROMPT-DEBUG] 컨텍스트 상태:', {
-    episode: targetEpisodeNumber,
-    hasWorldBible: !!context.worldBible,
-    characterCount: context.activeCharacters?.length || 0,
-    hasPreviousEnding: !!context.previousEpisodeEnding,
-    previousEndingLength: context.previousEpisodeEnding?.length || 0,
-    projectId: projectId || context.worldBible?.project_id || 'unknown',
-  });
-
-  // V10.0: projectId가 없으면 context에서 추출 시도
-  const effectiveProjectId = projectId || context.worldBible?.project_id;
-
-  // V10.0: 동적 StyleDNA 로드
   const systemPrompt = await buildSystemPromptV9(targetEpisodeNumber, effectiveProjectId);
   const userPrompt = buildUserPromptV9(context, userInstruction, targetEpisodeNumber);
-
-  // 최종 검증 로그
-  console.log('[PROMPT-DEBUG] ===== 프롬프트 생성 완료 =====');
-  console.log('[PROMPT-DEBUG] 시스템 프롬프트 길이:', systemPrompt.length);
-  console.log('[PROMPT-DEBUG] 유저 프롬프트 길이:', userPrompt.length);
-  console.log('[PROMPT-DEBUG] 유저 프롬프트 시작:', userPrompt.substring(0, 300));
-
-  // 시놉시스 포함 여부 최종 확인
-  const hasSynopsisTag = userPrompt.includes('<episode_synopsis');
-  const hasReminderTag = userPrompt.includes('최종 확인');
-  console.log('[PROMPT-DEBUG] 시놉시스 태그 포함:', hasSynopsisTag);
-  console.log('[PROMPT-DEBUG] 최종 리마인더 포함:', hasReminderTag);
-
-  if (!hasSynopsisTag) {
-    console.error('[CRITICAL] ❌ 유저 프롬프트에 시놉시스가 포함되지 않음!');
-  }
 
   return { systemPrompt, userPrompt };
 }
 
-// ============================================================================
-// [Prose] 파싱 유틸리티
-// ============================================================================
 export interface ProseParseResult {
   scenePlan: string | null;
   prose: string;
   raw: string;
 }
 
-/**
- * AI 출력에서 [Scene Plan]과 [Prose] 섹션을 파싱
- * [Prose] 이후의 본문만 에디터에 표시
- */
 export function parseProseFromOutput(content: string): ProseParseResult {
   const raw = content;
-
-  // [Prose] 태그 이후 텍스트 추출
   const proseMatch = content.match(/\[Prose\]\s*([\s\S]*)/i);
-
-  if (proseMatch) {
-    const prose = proseMatch[1].trim();
-
-    // [Scene Plan] 추출 (디버깅/로깅용)
-    const scenePlanMatch = content.match(/\[Scene Plan\]\s*([\s\S]*?)\[Prose\]/i);
-    const scenePlan = scenePlanMatch ? scenePlanMatch[1].trim() : null;
-
-    return { scenePlan, prose, raw };
+  if (!proseMatch) {
+    return { scenePlan: null, prose: content.trim(), raw };
   }
 
-  // [Prose] 태그가 없으면 전체를 prose로 반환
-  // (기존 방식 호환성)
-  return { scenePlan: null, prose: content, raw };
+  const scenePlanMatch = content.match(/\[Scene Plan\]\s*([\s\S]*?)\[Prose\]/i);
+  return {
+    scenePlan: scenePlanMatch ? scenePlanMatch[1].trim() : null,
+    prose: proseMatch[1].trim(),
+    raw,
+  };
 }
 
-/**
- * 스트리밍 중 [Prose] 이후 텍스트만 필터링
- */
 export function filterProseFromStream(content: string): string {
-  // [Prose] 태그 발견 시 그 이후만 반환
   const proseIndex = content.indexOf('[Prose]');
-
-  if (proseIndex !== -1) {
-    return content.substring(proseIndex + 7).trimStart(); // '[Prose]' 길이 = 7
+  if (proseIndex >= 0) {
+    return content.slice(proseIndex + '[Prose]'.length).trimStart();
   }
-
-  // [Scene Plan]이 있고 [Prose]가 아직 없으면 빈 문자열 반환 (아직 본문 미시작)
   if (content.includes('[Scene Plan]')) {
     return '';
   }
-
-  // 둘 다 없으면 전체 반환 (기존 방식)
   return content;
 }
 
-// ============================================================================
-// 로그 압축용 프롬프트 조립 (기존 유지)
-// ============================================================================
 export function buildLogCompressionPrompts(episodeContent: string): {
   systemPrompt: string;
   userPrompt: string;
 } {
-  const systemPrompt = `당신은 웹소설 에피소드 분석 전문가입니다.
-에피소드를 읽고 핵심 정보를 JSON 형태로 정확하게 추출합니다.
-반드시 유효한 JSON만 출력하세요.`;
-
-  const userPrompt = `다음 에피소드를 분석하여 핵심 정보를 추출하세요.
-
-【에피소드 내용】
-"""
-${episodeContent}
-"""
-
-【출력 형식】
-아래 JSON 구조를 정확히 따르세요. 다른 텍스트 없이 JSON만 출력하세요.
-
-\`\`\`json
-{
-  "summary": "200자 내외의 줄거리 요약 (핵심 사건과 결과 중심으로)",
-  "characterStates": {
-    "캐릭터명": {
-      "changes": ["이번 화에서의 상태 변화 목록"],
-      "emotionalArc": "감정 변화 (예: 분노 → 결의)"
-    }
-  },
-  "itemChanges": {
-    "gained": ["획득한 아이템 목록"],
-    "lost": ["상실한 아이템 목록"]
-  },
-  "relationshipChanges": [
-    {"characters": ["캐릭터A", "캐릭터B"], "change": "관계 변화 설명"}
-  ],
-  "foreshadowing": ["새로 뿌린 떡밥/복선 목록"],
-  "resolvedHooks": ["이번 화에서 회수된 떡밥 목록"]
-}
-\`\`\`
-
-해당 항목이 없으면 빈 배열 [] 또는 빈 객체 {}를 사용하세요.`;
-
-  return { systemPrompt, userPrompt };
+  return {
+    systemPrompt: [
+      'You are a strict episode memory logger.',
+      'Summarize only factual events from the provided episode.',
+      'Return JSON only.',
+      'Schema:',
+      '{',
+      '  "summary": string,',
+      '  "characterStates": { "<name>": { "changes": string[], "emotionalArc": string } },',
+      '  "itemChanges": { "gained": string[], "lost": string[] },',
+      '  "relationshipChanges": [{ "characters": string[], "change": string }],',
+      '  "foreshadowing": string[],',
+      '  "resolvedHooks": string[]',
+      '}',
+    ].join('\n'),
+    userPrompt: `Analyze the episode and produce memory log JSON.\n\n${episodeContent}`,
+  };
 }
 
-// ============================================================================
-// 피드백 분석용 프롬프트 조립 (기존 유지)
-// ============================================================================
 export function buildFeedbackAnalysisPrompts(
   originalText: string,
   editedText: string
 ): { systemPrompt: string; userPrompt: string } {
-  const systemPrompt = `당신은 문체 분석 전문가입니다.
-사용자가 AI 작성 원문을 어떻게 수정했는지 분석하여, 문체 선호도를 추출합니다.
-반드시 유효한 JSON만 출력하세요.`;
-
-  const userPrompt = `원문과 수정본을 비교하여 사용자의 문체 선호도를 분석하세요.
-
-【원문 (AI 작성)】
-"""
-${originalText}
-"""
-
-【수정본 (사용자 편집)】
-"""
-${editedText}
-"""
-
-【출력 형식】
-\`\`\`json
-{
-  "feedbackType": "style | vocabulary | pacing | dialogue | description | structure 중 하나",
-  "preferenceSummary": "사용자 선호도 요약 (한 문장)",
-  "avoidPatterns": ["사용자가 피하고 싶어하는 표현/패턴 목록"],
-  "favorPatterns": ["사용자가 선호하는 표현/패턴 목록"],
-  "confidence": 0.5에서 1.0 사이의 신뢰도 (변화가 명확할수록 높음)
-}
-\`\`\``;
-
-  return { systemPrompt, userPrompt };
+  return {
+    systemPrompt: [
+      'You are a writing-style feedback analyzer.',
+      'Compare original text and edited text.',
+      'Extract stable preference rules.',
+      'Return JSON only.',
+      '{',
+      '  "feedback_type": string,',
+      '  "preference_summary": string,',
+      '  "avoid_patterns": string[],',
+      '  "favor_patterns": string[],',
+      '  "confidence": number',
+      '}',
+    ].join('\n'),
+    userPrompt: [
+      '[ORIGINAL]',
+      originalText,
+      '',
+      '[EDITED]',
+      editedText,
+    ].join('\n'),
+  };
 }
 
-// ============================================================================
-// 테스트용 더미 컨텍스트 (기존 호환성 유지)
-// ============================================================================
 export function createTestContext(): SlidingWindowContext {
-  console.warn('[DEPRECATED] createTestContext() 사용됨 - 실제 DB 데이터 사용 권장');
-
   return {
     worldBible: {
-      id: 'test-world-bible',
+      id: 'test-world',
       project_id: 'test-project',
-      world_name: '테스트 무림',
-      time_period: '가상의 고대 중원',
-      geography: '중원 대륙',
+      world_name: '검황전설',
+      time_period: '무협',
+      geography: '중원',
       power_system_name: '내공',
-      power_system_rules: '물리 법칙 기반 무술',
       power_system_ranks: null,
-      absolute_rules: ['환각 금지', '설정 엄수'],
-      forbidden_elements: ['현대 외래어', '판타지 무공'],
+      power_system_rules: null,
+      absolute_rules: ['시놉시스 우선', '연속성 유지'],
+      forbidden_elements: ['현대어 남용'],
       additional_settings: null,
       version: 1,
       created_at: new Date().toISOString(),
@@ -839,86 +672,111 @@ export function createTestContext(): SlidingWindowContext {
     },
     recentLogs: [],
     lastSceneAnchor: '',
+    previousEpisodeEnding: '',
     activeCharacters: [],
     unresolvedHooks: [],
     writingPreferences: [],
+    episodeSynopses: [
+      {
+        episodeNumber: 1,
+        title: '테스트 회차',
+        synopsis: '주인공이 폐허에서 깨어나 첫 단서를 발견한다.',
+        goals: ['상황 파악', '첫 갈등 점화'],
+        keyEvents: ['폐허 각성', '노인과 조우', '수상한 흔적 발견'],
+        featuredCharacters: ['이청운'],
+        location: '폐허',
+        timeContext: '새벽',
+        arcName: '서막',
+        arcPosition: 'start',
+        foreshadowing: ['검흔'],
+        callbacks: [],
+        isCurrent: true,
+        forbidden: '현대 용어 남용 금지',
+        sceneBeats: '폐허에서 각성 -> 단서 확인 -> 위협 감지',
+      },
+    ],
   };
 }
 
-// ============================================================================
-// 레거시 호환 함수들 (기존 API 유지)
-// ============================================================================
-
-/** @deprecated V9.0에서는 buildEpisodeGenerationPrompts 사용 권장 */
+/** @deprecated Use buildUserPromptV9 directly. */
 export function serializeContextToPrompt(context: SlidingWindowContext): string {
-  console.warn('[DEPRECATED] serializeContextToPrompt() - V9.0에서는 buildUserPromptV9() 사용');
-  return buildUserPromptV9(context, '', 1);
+  const targetEpisode =
+    context.episodeSynopses?.find((item) => item.isCurrent)?.episodeNumber || 1;
+  return buildUserPromptV9(context, '', targetEpisode);
 }
 
-/** @deprecated */
+/** @deprecated Use buildEpisodeGenerationPrompts. */
 export async function buildEpisodeGenerationPrompt(
   context: SlidingWindowContext,
   userInstruction: string,
   targetEpisodeNumber: number
 ): Promise<string> {
-  console.warn('[DEPRECATED] buildEpisodeGenerationPrompt() - V9.0에서는 buildEpisodeGenerationPrompts() 사용');
-  const { userPrompt } = await buildEpisodeGenerationPrompts(context, userInstruction, targetEpisodeNumber);
+  const { userPrompt } = await buildEpisodeGenerationPrompts(
+    context,
+    userInstruction,
+    targetEpisodeNumber
+  );
   return userPrompt;
 }
 
-/** @deprecated */
+/** @deprecated Use buildLogCompressionPrompts. */
 export function buildLogCompressionPrompt(episodeContent: string): string {
-  const { userPrompt } = buildLogCompressionPrompts(episodeContent);
-  return userPrompt;
+  return buildLogCompressionPrompts(episodeContent).userPrompt;
 }
 
-/** @deprecated */
+/** @deprecated Use buildFeedbackAnalysisPrompts. */
 export function buildFeedbackAnalysisPrompt(
   originalText: string,
   editedText: string
 ): string {
-  const { userPrompt } = buildFeedbackAnalysisPrompts(originalText, editedText);
-  return userPrompt;
+  return buildFeedbackAnalysisPrompts(originalText, editedText).userPrompt;
 }
 
-// ============================================================================
-// 레거시 호환: LogicCheck (V9.0에서는 ProseParseResult로 대체)
-// ============================================================================
 export interface LogicCheckResult {
-  continuityCheck?: string;
-  characterCheck?: string;
-  plotCheck?: string;
-  settingCheck?: string;
+  passed: boolean;
+  issues: string[];
+  raw: string;
 }
 
-/** @deprecated V9.0에서는 parseProseFromOutput() 사용 */
 export function parseAndRemoveLogicCheck(content: string): {
   cleanContent: string;
   logicCheck: LogicCheckResult | null;
 } {
-  // [Prose] 파싱으로 대체
-  const { prose } = parseProseFromOutput(content);
+  const match = content.match(/<logic_check>([\s\S]*?)<\/logic_check>/i);
+  if (!match) {
+    return { cleanContent: content, logicCheck: null };
+  }
+
+  const raw = match[1].trim();
+  const issues = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('-') || line.toLowerCase().includes('issue'))
+    .map((line) => line.replace(/^-+\s*/, ''));
+
+  const passed =
+    /passed\s*:\s*true/i.test(raw) ||
+    /pass/i.test(raw) && !/fail/i.test(raw);
+
+  const cleanContent = content.replace(/<logic_check>[\s\S]*?<\/logic_check>/gi, '').trim();
   return {
-    cleanContent: prose,
-    logicCheck: null,
+    cleanContent,
+    logicCheck: {
+      passed,
+      issues,
+      raw,
+    },
   };
 }
 
-// ============================================================================
-// 캐릭터 상태 추적기 (기존 유지)
-// ============================================================================
 export interface CharacterStatusTracker {
   characterId: string;
   characterName: string;
   role: string;
-
-  // 현재 상태
   currentLocation: string | null;
   emotionalState: string | null;
   injuries: string[];
   possessedItems: string[];
-
-  // 이번 에피소드에서의 변화
   changesThisEpisode: {
     locationChange?: { from: string; to: string };
     emotionalChange?: { from: string; to: string };
@@ -927,8 +785,6 @@ export interface CharacterStatusTracker {
     gainedItems?: string[];
     lostItems?: string[];
   };
-
-  // 마지막 업데이트 에피소드
   lastUpdatedEpisode: number;
 }
 
@@ -938,20 +794,17 @@ export function updateCharacterStatusFromLog(
   logData: any,
   episodeNumber: number
 ): CharacterStatusTracker[] {
-  if (!logData?.characterStates) return existingTrackers;
+  if (!logData?.characterStates) {
+    return existingTrackers;
+  }
 
-  const updatedTrackers = [...existingTrackers];
-
-  for (const [charName, charState] of Object.entries(logData.characterStates)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const state = charState as any;
-
-    let tracker = updatedTrackers.find(t => t.characterName === charName);
-
+  const trackers = [...existingTrackers];
+  const findOrCreate = (characterName: string) => {
+    let tracker = trackers.find((item) => item.characterName === characterName);
     if (!tracker) {
       tracker = {
-        characterId: `auto-${charName}`,
-        characterName: charName,
+        characterId: `auto-${characterName}`,
+        characterName,
         role: 'unknown',
         currentLocation: null,
         emotionalState: null,
@@ -960,127 +813,116 @@ export function updateCharacterStatusFromLog(
         changesThisEpisode: {},
         lastUpdatedEpisode: episodeNumber,
       };
-      updatedTrackers.push(tracker);
+      trackers.push(tracker);
+    }
+    return tracker;
+  };
+
+  Object.entries(logData.characterStates).forEach(([characterName, rawState]) => {
+    const tracker = findOrCreate(characterName);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = rawState as any;
+
+    if (typeof state.emotionalArc === 'string' && state.emotionalArc.trim()) {
+      const lastEmotion = state.emotionalArc
+        .split(/->|→|,|>/)
+        .map((item: string) => item.trim())
+        .filter(Boolean)
+        .at(-1);
+
+      if (lastEmotion && lastEmotion !== tracker.emotionalState) {
+        tracker.changesThisEpisode.emotionalChange = {
+          from: tracker.emotionalState || 'unknown',
+          to: lastEmotion,
+        };
+        tracker.emotionalState = lastEmotion;
+      }
     }
 
-    // 감정 상태 업데이트
-    if (state.emotionalArc) {
-      const emotions = state.emotionalArc.split('→').map((e: string) => e.trim());
-      if (emotions.length > 0) {
-        const newEmotion = emotions[emotions.length - 1];
-        if (tracker.emotionalState !== newEmotion) {
-          tracker.changesThisEpisode.emotionalChange = {
-            from: tracker.emotionalState || '보통',
-            to: newEmotion,
+    if (Array.isArray(state.changes)) {
+      state.changes.forEach((changeRaw: unknown) => {
+        const change = String(changeRaw);
+        const lowered = change.toLowerCase();
+
+        if ((/부상|상처|injur/.test(change) || /injur/.test(lowered)) && !tracker.injuries.includes(change)) {
+          tracker.injuries.push(change);
+          tracker.changesThisEpisode.newInjuries = tracker.changesThisEpisode.newInjuries || [];
+          tracker.changesThisEpisode.newInjuries.push(change);
+        }
+
+        const locationMatch = change.match(/(?:위치|장소|이동)\s*[:：]\s*(.+)$/);
+        if (locationMatch?.[1]) {
+          const nextLocation = locationMatch[1].trim();
+          tracker.changesThisEpisode.locationChange = {
+            from: tracker.currentLocation || 'unknown',
+            to: nextLocation,
           };
-          tracker.emotionalState = newEmotion;
+          tracker.currentLocation = nextLocation;
         }
-      }
-    }
-
-    // 변화 목록에서 부상/위치 추출
-    if (state.changes && Array.isArray(state.changes)) {
-      for (const change of state.changes) {
-        const changeStr = String(change).toLowerCase();
-
-        if (changeStr.includes('부상') || changeStr.includes('상처') || changeStr.includes('다침')) {
-          if (!tracker.injuries.includes(change)) {
-            tracker.injuries.push(change);
-            tracker.changesThisEpisode.newInjuries = tracker.changesThisEpisode.newInjuries || [];
-            tracker.changesThisEpisode.newInjuries.push(change);
-          }
-        }
-
-        if (changeStr.includes('이동') || changeStr.includes('도착') || changeStr.includes('떠남')) {
-          const locationMatch = change.match(/(?:이동|도착|떠남)[^\s]*\s*(.+)/);
-          if (locationMatch) {
-            const newLocation = locationMatch[1].trim();
-            tracker.changesThisEpisode.locationChange = {
-              from: tracker.currentLocation || '불명',
-              to: newLocation,
-            };
-            tracker.currentLocation = newLocation;
-          }
-        }
-      }
+      });
     }
 
     tracker.lastUpdatedEpisode = episodeNumber;
-  }
+  });
 
-  // 아이템 변화 처리
-  if (logData.itemChanges) {
-    if (logData.itemChanges.gained) {
-      for (const item of logData.itemChanges.gained) {
-        // 첫 번째 캐릭터(주인공)에게 추가
-        if (updatedTrackers.length > 0) {
-          const protagonist = updatedTrackers.find(t => t.role === 'protagonist') || updatedTrackers[0];
-          if (!protagonist.possessedItems.includes(item)) {
-            protagonist.possessedItems.push(item);
-            protagonist.changesThisEpisode.gainedItems = protagonist.changesThisEpisode.gainedItems || [];
-            protagonist.changesThisEpisode.gainedItems.push(item);
-          }
+  if (logData.itemChanges?.gained && Array.isArray(logData.itemChanges.gained)) {
+    const owner = trackers.find((item) => item.role === 'protagonist') || trackers[0];
+    if (owner) {
+      logData.itemChanges.gained.forEach((item: unknown) => {
+        const name = String(item);
+        if (!owner.possessedItems.includes(name)) {
+          owner.possessedItems.push(name);
+          owner.changesThisEpisode.gainedItems = owner.changesThisEpisode.gainedItems || [];
+          owner.changesThisEpisode.gainedItems.push(name);
         }
-      }
-    }
-
-    if (logData.itemChanges.lost) {
-      for (const item of logData.itemChanges.lost) {
-        for (const tracker of updatedTrackers) {
-          const idx = tracker.possessedItems.indexOf(item);
-          if (idx !== -1) {
-            tracker.possessedItems.splice(idx, 1);
-            tracker.changesThisEpisode.lostItems = tracker.changesThisEpisode.lostItems || [];
-            tracker.changesThisEpisode.lostItems.push(item);
-          }
-        }
-      }
+      });
     }
   }
 
-  return updatedTrackers;
+  if (logData.itemChanges?.lost && Array.isArray(logData.itemChanges.lost)) {
+    logData.itemChanges.lost.forEach((item: unknown) => {
+      const name = String(item);
+      trackers.forEach((tracker) => {
+        if (!tracker.possessedItems.includes(name)) return;
+        tracker.possessedItems = tracker.possessedItems.filter((owned) => owned !== name);
+        tracker.changesThisEpisode.lostItems = tracker.changesThisEpisode.lostItems || [];
+        tracker.changesThisEpisode.lostItems.push(name);
+      });
+    });
+  }
+
+  return trackers;
 }
 
 export function serializeCharacterStatusForPrompt(trackers: CharacterStatusTracker[]): string {
-  if (trackers.length === 0) return '';
+  if (!trackers.length) return '';
 
-  const statusLines = trackers
-    .filter(t => t.role === 'protagonist' || t.role === 'antagonist' || t.role === 'supporting')
-    .slice(0, 5)
-    .map(t => {
-      const parts = [`${t.characterName}`];
-      if (t.currentLocation) parts.push(`위치:${t.currentLocation}`);
-      if (t.emotionalState) parts.push(`감정:${t.emotionalState}`);
-      if (t.injuries.length > 0) parts.push(`부상:${t.injuries[0]}`);
+  const lines = trackers
+    .filter((tracker) =>
+      ['protagonist', 'antagonist', 'supporting', 'unknown'].includes(tracker.role)
+    )
+    .slice(0, 8)
+    .map((tracker) => {
+      const parts = [tracker.characterName];
+      if (tracker.currentLocation) parts.push(`위치:${tracker.currentLocation}`);
+      if (tracker.emotionalState) parts.push(`감정:${tracker.emotionalState}`);
+      if (tracker.injuries.length) parts.push(`부상:${tracker.injuries[0]}`);
       return `- ${parts.join(' | ')}`;
     })
     .join('\n');
 
-  return `
-<character_status>
-${statusLines}
-</character_status>
-`;
+  return `<character_status>\n${lines}\n</character_status>`;
 }
 
-// ============================================================================
-// 티어 기반 캐릭터 강조 (기존 유지)
-// ============================================================================
 export function buildTierBasedCharacterEmphasis(characters: ActiveCharacter[]): string {
-  if (!characters || characters.length === 0) return '';
+  if (!characters?.length) return '';
 
-  const tier1 = characters.filter(c => c.additionalData?.tier === 1);
-  const tier2 = characters.filter(c => c.additionalData?.tier === 2);
+  const tier1 = characters.filter((character) => character.additionalData?.tier === 1);
+  const tier2 = characters.filter((character) => character.additionalData?.tier === 2);
 
-  const sections: string[] = [];
+  const lines: string[] = [];
+  if (tier1.length) lines.push(`[핵심 인물] ${tier1.map((character) => character.name).join(', ')}`);
+  if (tier2.length) lines.push(`[주요 조연] ${tier2.map((character) => character.name).join(', ')}`);
 
-  if (tier1.length > 0) {
-    sections.push(`[핵심 인물] ${tier1.map(c => c.name).join(', ')}`);
-  }
-
-  if (tier2.length > 0) {
-    sections.push(`[주요 조연] ${tier2.map(c => c.name).join(', ')}`);
-  }
-
-  return sections.join('\n');
+  return lines.join('\n');
 }

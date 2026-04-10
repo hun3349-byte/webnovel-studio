@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CharacterStatusBoard, StoryBiblePanel, FloatingEditTooltip } from '@/components/editor';
+import type { StageProgressEvent } from '@/types/generation';
 
 interface Episode {
   id: string;
@@ -11,17 +12,20 @@ interface Episode {
   episode_number: number;
   title: string | null;
   content: string;
+  original_content?: string | null;
   char_count: number;
   status: 'draft' | 'generating' | 'review' | 'published';
   log_status: string;
 }
 
 interface StreamMessage {
-  type: 'heartbeat' | 'text' | 'complete' | 'error';
+  type: 'heartbeat' | 'text' | 'complete' | 'error' | 'stage' | 'metadata';
   content?: string;
   message?: string;
   fullText?: string;
   charCount?: number;
+  stageEvent?: StageProgressEvent;
+  pipeline?: StageProgressEvent[];
 }
 
 interface WorldBible {
@@ -180,6 +184,7 @@ export default function EpisodeEditorPage() {
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
+  const [generatedOriginalContent, setGeneratedOriginalContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -191,6 +196,7 @@ export default function EpisodeEditorPage() {
   // Generation settings
   const [instruction, setInstruction] = useState('');
   const [useMock, setUseMock] = useState(true);
+  const generationModeLabel = 'Claude Writer';
 
   // Sliding Window Context
   const [worldBible, setWorldBible] = useState<WorldBible | null>(null);
@@ -206,7 +212,16 @@ export default function EpisodeEditorPage() {
   const [validationResult, setValidationResult] = useState<{
     overallScore: number;
     passed: boolean;
+    summary?: string;
+    checks?: Array<{
+      id: string;
+      label: string;
+      passed: boolean;
+      score: number;
+      comment: string;
+    }>;
     suggestions: string[];
+    model?: string;
   } | null>(null);
 
   // ★ 기능 1: 채택 후 수정 기능 (Unlock Editor)
@@ -222,16 +237,48 @@ export default function EpisodeEditorPage() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // ★★★ Hidden CoT (logic_check) 실시간 필터링 상태 ★★★
-  const [hiddenCoTBuffer, setHiddenCoTBuffer] = useState('');
-  const [isInsideLogicCheck, setIsInsideLogicCheck] = useState(false);
-
   /**
    * V9.0: 스트리밍 텍스트에서 [Scene Plan]을 필터링하고 [Prose] 이후 텍스트만 반환
    * @param currentText 현재까지 누적된 전체 텍스트
    * @returns 필터링된 텍스트 ([Prose] 이후만)
    */
   const filterLogicCheckFromStream = useCallback((currentText: string): string => {
+    const stripIncompleteXmlBlock = (text: string, tagName: string): string => {
+      const lower = text.toLowerCase();
+      const openTagIndex = lower.lastIndexOf(`<${tagName}`);
+      if (openTagIndex === -1) return text;
+
+      const closeTag = `</${tagName}>`;
+      const closeTagIndex = lower.indexOf(closeTag, openTagIndex);
+      return closeTagIndex === -1 ? text.slice(0, openTagIndex) : text;
+    };
+
+    let filteredText = currentText;
+    filteredText = filteredText.replace(/<logic_check>[\s\S]*?<\/logic_check>/gi, '');
+    filteredText = stripIncompleteXmlBlock(filteredText, 'logic_check');
+    filteredText = filteredText.replace(/<scene_plan>[\s\S]*?<\/scene_plan>/gi, '');
+    filteredText = stripIncompleteXmlBlock(filteredText, 'scene_plan');
+
+    const proseHeaderIndex = filteredText.indexOf('[Prose]');
+    const proseTagMatch = /<prose\b[^>]*>/i.exec(filteredText);
+    let proseStart = -1;
+
+    if (proseHeaderIndex !== -1) {
+      proseStart = proseHeaderIndex + '[Prose]'.length;
+    }
+    if (proseTagMatch && (proseStart === -1 || proseTagMatch.index < proseHeaderIndex)) {
+      proseStart = proseTagMatch.index + proseTagMatch[0].length;
+    }
+
+    if (proseStart !== -1) {
+      filteredText = filteredText.slice(proseStart);
+    } else if (filteredText.includes('[Scene Plan]') || /<scene_plan\b/i.test(filteredText)) {
+      return '';
+    }
+
+    filteredText = filteredText.replace(/<\/prose>/gi, '');
+    return filteredText.trimStart();
+    /* legacy parser disabled
     // V9.0: [Prose] 태그 이후 텍스트만 반환
     const proseIndex = currentText.indexOf('[Prose]');
 
@@ -258,6 +305,7 @@ export default function EpisodeEditorPage() {
     }
 
     return filtered.trim();
+    */
   }, []);
 
   // Load episode
@@ -271,6 +319,7 @@ export default function EpisodeEditorPage() {
       setEpisode(data.episode);
       setContent(data.episode.content || '');
       setTitle(data.episode.title || '');
+      setGeneratedOriginalContent(data.episode.original_content || null);
     } catch {
       setError('에피소드를 불러오는데 실패했습니다.');
     } finally {
@@ -285,7 +334,9 @@ export default function EpisodeEditorPage() {
       const [worldRes, charRes, hooksRes, logsRes] = await Promise.all([
         fetch(`/api/projects/${projectId}/world-bible`),
         fetch(`/api/projects/${projectId}/characters`),
-        fetch(`/api/projects/${projectId}/hooks?status=open&limit=5`),
+        fetch(
+          `/api/projects/${projectId}/hooks?status=open&limit=5&episodeNumber=${episode?.episode_number ?? 9999}`
+        ),
         fetch(`/api/projects/${projectId}/episode-logs?limit=3`),
       ]);
 
@@ -311,7 +362,7 @@ export default function EpisodeEditorPage() {
     } catch {
       // Context loading is non-critical, ignore errors
     }
-  }, [projectId]);
+  }, [episode?.episode_number, projectId]);
 
   useEffect(() => {
     loadEpisode();
@@ -335,13 +386,18 @@ export default function EpisodeEditorPage() {
       const res = await fetch(`/api/projects/${projectId}/episodes/${episodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content }),
+        body: JSON.stringify({
+          title,
+          content,
+          originalContent: episode?.original_content || generatedOriginalContent || undefined,
+        }),
       });
 
       if (!res.ok) throw new Error('Failed to save');
 
       const data = await res.json();
       setEpisode(data.episode);
+      setGeneratedOriginalContent(data.episode?.original_content || generatedOriginalContent);
       setSuccessMessage('저장되었습니다!');
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch {
@@ -363,48 +419,18 @@ export default function EpisodeEditorPage() {
     setGenerating(true);
     setStatus('연결 중...');
     setError(null);
-    setContent(''); // Clear existing content
+    const existingDraft = content.trim();
+    const continueFromExisting = existingDraft.length >= 120;
+    if (!continueFromExisting) {
+      setContent(''); // Fresh draft mode only
+    } else {
+      setStatus('湲곗〈 蹂몃Ц??留ㅼ? 吏???댁뼱?곌린 ??꾩꽦?섏쐞 以?..');
+    }
 
     abortControllerRef.current = new AbortController();
 
     try {
-      // 실제 프로젝트 컨텍스트 구성
-      const context = worldBible ? {
-        worldBible: {
-          id: worldBible.id,
-          project_id: projectId,
-          world_name: worldBible.world_name,
-          time_period: worldBible.time_period,
-          power_system_name: worldBible.power_system_name,
-          absolute_rules: worldBible.absolute_rules || [],
-        },
-        recentLogs: recentLogs.map(log => ({
-          episodeNumber: log.episode_number,
-          summary: log.summary,
-          lastSceneAnchor: log.last_500_chars,
-          isFallback: false,
-        })),
-        lastSceneAnchor: recentLogs[0]?.last_500_chars || '',
-        activeCharacters: characters.map(char => ({
-          id: char.id,
-          name: char.name,
-          role: char.role,
-          isAlive: char.is_alive,
-          currentLocation: char.current_location,
-          emotionalState: char.emotional_state,
-        })),
-        unresolvedHooks: unresolvedHooks.map(hook => ({
-          id: hook.id,
-          hookType: hook.hook_type,
-          summary: hook.summary,
-          importance: hook.importance,
-          createdInEpisodeNumber: hook.created_in_episode_number,
-        })),
-        writingPreferences: [],
-      } : null;
-
-      // ★★★ V9.3 수정: projectId를 전달하여 서버에서 시놉시스 포함 전체 컨텍스트 로드 ★★★
-      const res = await fetch('/api/ai/test-generate', {
+      const res = await fetch(useMock ? '/api/ai/test-generate' : '/api/ai/generate-episode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -413,6 +439,8 @@ export default function EpisodeEditorPage() {
           targetEpisodeNumber: episode?.episode_number || 1,
           useTestContext: false, // 항상 실제 DB 사용
           useMock,
+          continueFromExisting,
+          existingContent: continueFromExisting ? existingDraft : '',
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -431,7 +459,7 @@ export default function EpisodeEditorPage() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
+        const lines = buffer.split(/\r?\n\r?\n/);
         buffer = lines.pop() || '';
 
         for (const line of lines) {
@@ -449,19 +477,30 @@ export default function EpisodeEditorPage() {
                 case 'text':
                   if (message.content) {
                     fullText += message.content;
-                    // ★★★ Hidden CoT 실시간 필터링 적용 ★★★
                     const filteredText = filterLogicCheckFromStream(fullText);
-                    setContent(filteredText);
-                    setStatus('생성 중...');
+                    if (!continueFromExisting) {
+                      setContent(filteredText);
+                    }
+                    setStatus('집필 진행중');
                   }
                   break;
                 case 'complete':
-                  // ★★★ 완료 시에도 최종 필터링 적용 ★★★
                   if (message.fullText) {
                     const finalFiltered = filterLogicCheckFromStream(message.fullText);
                     setContent(finalFiltered);
+                    setGeneratedOriginalContent(finalFiltered);
+                    void runProseValidation(finalFiltered);
                   }
-                  setStatus('완료!');
+                  setStatus('완료');
+                  break;
+                case 'stage':
+                  if (message.stageEvent) {
+                    if (message.stageEvent.summary) {
+                      setStatus(message.stageEvent.summary);
+                    }
+                  }
+                  break;
+                case 'metadata':
                   break;
                 case 'error':
                   setError(message.message || 'Unknown error');
@@ -475,7 +514,7 @@ export default function EpisodeEditorPage() {
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        setStatus('중단됨');
+        setStatus('생성 중단');
       } else {
         setError(err instanceof Error ? err.message : 'Generation failed');
       }
@@ -513,7 +552,11 @@ export default function EpisodeEditorPage() {
       const saveRes = await fetch(`/api/projects/${projectId}/episodes/${episodeId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content }),
+        body: JSON.stringify({
+          title,
+          content,
+          originalContent: episode?.original_content || generatedOriginalContent || undefined,
+        }),
       });
 
       if (!saveRes.ok) {
@@ -627,8 +670,7 @@ export default function EpisodeEditorPage() {
           try {
             const data = await res.json();
             throw new Error(data.error || '부분 수정 실패');
-          } catch (parseError) {
-            // JSON 파싱 실패 시
+          } catch {
             throw new Error(`서버 오류 (${res.status}) - 잠시 후 다시 시도해주세요.`);
           }
         } else {
@@ -641,7 +683,7 @@ export default function EpisodeEditorPage() {
       let data;
       try {
         data = await res.json();
-      } catch (parseError) {
+      } catch {
         throw new Error('AI 응답 파싱 실패 - 잠시 후 다시 시도해주세요.');
       }
 
@@ -679,24 +721,24 @@ export default function EpisodeEditorPage() {
     return 'text-green-400';
   };
 
-  // Quick quality validation
-  const handleQuickValidation = async () => {
-    if (!content.trim() || content.length < 100) {
+  const runProseValidation = useCallback(async (targetContent: string) => {
+    if (!targetContent.trim() || targetContent.length < 100) {
       setError('검증하려면 최소 100자 이상 작성해주세요.');
       return;
     }
 
+    setError(null);
     setValidating(true);
     setValidationResult(null);
 
     try {
-      const res = await fetch('/api/ai/validate-quality', {
+      const res = await fetch('/api/ai/validate-prose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          content,
+          projectId,
+          content: targetContent,
           episodeNumber: episode?.episode_number,
-          mode: 'quick',
         }),
       });
 
@@ -704,15 +746,24 @@ export default function EpisodeEditorPage() {
 
       const data = await res.json();
       setValidationResult({
-        overallScore: data.result.overallScore,
-        passed: data.result.passed,
-        suggestions: data.result.suggestions || [],
+        overallScore: data.result?.overallScore ?? 0,
+        passed: Boolean(data.result?.passed),
+        summary: data.result?.summary ?? '',
+        checks: Array.isArray(data.result?.checks) ? data.result.checks : [],
+        suggestions: Array.isArray(data.result?.suggestions) ? data.result.suggestions : [],
+        model: data.model,
       });
+      setActivePanel('quality');
     } catch {
       setError('퀄리티 검증에 실패했습니다.');
     } finally {
       setValidating(false);
     }
+  }, [episode?.episode_number, projectId]);
+
+  // Quick quality validation
+  const handleQuickValidation = async () => {
+    await runProseValidation(content);
   };
 
   if (loading) {
@@ -744,6 +795,9 @@ export default function EpisodeEditorPage() {
                 className="bg-transparent border-b border-gray-700 px-2 py-1 focus:outline-none focus:border-blue-500 w-48"
               />
             </div>
+            <span className="rounded-full border border-cyan-700 bg-cyan-500/15 px-3 py-1.5 text-sm font-semibold text-cyan-200">
+              {generationModeLabel}
+            </span>
             {isPublished && (
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-1 rounded text-xs ${isUnlocked ? 'bg-amber-600' : 'bg-green-600'}`}>
@@ -903,7 +957,7 @@ export default function EpisodeEditorPage() {
                   : 'text-gray-400 hover:text-white'
               }`}
             >
-              퀄리티
+              퀄리티 검증
             </button>
           </div>
 
@@ -1092,6 +1146,11 @@ export default function EpisodeEditorPage() {
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
           <h2 className="text-lg font-semibold mb-4">AI 생성</h2>
 
+          <div className="mb-4 p-3 bg-gray-800 rounded-lg">
+            <div className="text-xs text-gray-400 mb-1">현재 집필 모드</div>
+            <div className="text-sm font-semibold text-cyan-200">Claude 단일 집필 (V9.0 Writer)</div>
+          </div>
+
           {/* Mock Toggle */}
           <div className="mb-4 p-3 bg-gray-800 rounded-lg">
             <div className="flex items-center justify-between">
@@ -1156,14 +1215,14 @@ export default function EpisodeEditorPage() {
                     : 'bg-blue-600 hover:bg-blue-700 text-white'
                 }`}
               >
-                {useMock ? 'Mock 생성' : 'AI 생성'}
+                AI 생성
               </button>
             ) : (
               <button
                 onClick={handleStopGeneration}
                 className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition"
               >
-                중단
+                생성 중단
               </button>
             )}
           </div>
@@ -1192,7 +1251,7 @@ export default function EpisodeEditorPage() {
           ) : (
           /* Quality Panel */
           <div className="flex-1 overflow-y-auto p-4 flex flex-col">
-            <h2 className="text-lg font-semibold mb-4">퀄리티 검증</h2>
+            <h2 className="text-lg font-semibold mb-4">퀄리티 검증 (OpenAI 리포트)</h2>
 
             {/* Quick Stats */}
             <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1240,6 +1299,31 @@ export default function EpisodeEditorPage() {
                 <div className={`text-sm font-medium ${validationResult.passed ? 'text-green-400' : 'text-red-400'}`}>
                   {validationResult.passed ? '통과' : '미통과'}
                 </div>
+                {validationResult.model && (
+                  <div className="mt-2 text-xs text-gray-500">
+                    OpenAI 검수 모델: {validationResult.model}
+                  </div>
+                )}
+                {validationResult.summary && (
+                  <div className="mt-2 text-xs text-gray-300">
+                    {validationResult.summary}
+                  </div>
+                )}
+                {validationResult.checks && validationResult.checks.length > 0 && (
+                  <div className="mt-3 space-y-2 border-t border-gray-700 pt-3">
+                    {validationResult.checks.map((check) => (
+                      <div key={check.id} className="rounded bg-gray-900/60 px-2 py-2 text-xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-gray-200">{check.label}</span>
+                          <span className={check.passed ? 'text-green-400' : 'text-red-400'}>
+                            {check.passed ? 'PASS' : 'FAIL'} · {check.score}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-gray-400">{check.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {validationResult.suggestions.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-gray-700">
                     <div className="text-xs text-gray-500 mb-2">개선 제안:</div>
@@ -1266,7 +1350,7 @@ export default function EpisodeEditorPage() {
                   : 'bg-purple-600 hover:bg-purple-700 text-white'
               }`}
             >
-              {validating ? '검증 중...' : '빠른 검증 실행'}
+              {validating ? '검증 중...' : 'OpenAI 검수 실행'}
             </button>
 
             {content.length < 100 && (

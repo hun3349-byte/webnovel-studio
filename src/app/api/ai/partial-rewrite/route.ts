@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { normalizeSerialParagraphs, trimReplayRestart } from '@/lib/editor/serial-normalizer';
 
 // ============================================================================
 // AI 부분 수정 API (Partial Rewrite)
@@ -17,6 +18,10 @@ export const maxDuration = 60;
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
 });
+
+const PARTIAL_REWRITE_OVERFLOW_RATIO = 1.9;
+const PARTIAL_REWRITE_MAX_ABS_CHARS = 2600;
+const PARTIAL_REWRITE_MIN_ABS_CHARS = 260;
 
 /**
  * AI 부분 수정 API
@@ -96,11 +101,25 @@ ${instruction}
       );
     }
 
+    const normalizedRewrittenText = sanitizePartialRewriteResult({
+      rewrittenText,
+      originalText: String(originalText),
+      beforeSelection: String(context?.beforeSelection || ''),
+      afterSelection: String(context?.afterSelection || ''),
+    });
+
+    if (!normalizedRewrittenText.trim()) {
+      return NextResponse.json(
+        { error: 'Partial rewrite output was empty after sanitization.' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      rewrittenText: rewrittenText.trim(),
+      rewrittenText: normalizedRewrittenText,
       originalLength: originalText.length,
-      newLength: rewrittenText.trim().length,
+      newLength: normalizedRewrittenText.length,
     });
   } catch (error) {
     console.error('[PartialRewrite] Error:', error);
@@ -109,4 +128,115 @@ ${instruction}
       { status: 500 }
     );
   }
+}
+
+function sanitizePartialRewriteResult(params: {
+  rewrittenText: string;
+  originalText: string;
+  beforeSelection: string;
+  afterSelection: string;
+}): string {
+  const original = params.originalText.trim();
+  const originalLength = original.length;
+  if (!originalLength) return '';
+
+  let text = stripFormattingArtifacts(params.rewrittenText);
+  text = normalizeSerialParagraphs(trimReplayRestart(text));
+  text = stripBoundaryEcho(text, params.beforeSelection, params.afterSelection);
+  text = normalizeSerialParagraphs(trimReplayRestart(text));
+
+  if (!text) return original;
+
+  const hardMax = Math.min(
+    PARTIAL_REWRITE_MAX_ABS_CHARS,
+    Math.max(PARTIAL_REWRITE_MIN_ABS_CHARS, Math.floor(originalLength * PARTIAL_REWRITE_OVERFLOW_RATIO) + 380)
+  );
+
+  if (looksLikeScopeOverflow(text, originalLength)) {
+    text = trimToSentenceBoundary(text, hardMax);
+  }
+
+  if (looksLikeGlobalRestart(text, original)) {
+    text = trimToSentenceBoundary(text, hardMax);
+  }
+
+  text = normalizeSerialParagraphs(trimReplayRestart(text));
+  return text || original;
+}
+
+function stripFormattingArtifacts(text: string): string {
+  return text
+    .replace(/^\s*```(?:text|markdown)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .replace(/^\s*\[?rewrite\]?:?\s*/i, '')
+    .trim();
+}
+
+function stripBoundaryEcho(text: string, beforeSelection: string, afterSelection: string): string {
+  let next = text.trim();
+  if (!next) return next;
+
+  const beforeTail = beforeSelection.trim().slice(-220);
+  if (beforeTail.length >= 60) {
+    const idx = next.indexOf(beforeTail);
+    if (idx >= 0 && idx <= 400) {
+      next = next.slice(idx + beforeTail.length).trimStart();
+    }
+  }
+
+  const afterHead = afterSelection.trim().slice(0, 220);
+  if (afterHead.length >= 60) {
+    const idx = next.lastIndexOf(afterHead);
+    if (idx >= Math.floor(next.length * 0.45)) {
+      next = next.slice(0, idx).trimEnd();
+    }
+  }
+
+  return next;
+}
+
+function looksLikeScopeOverflow(text: string, originalLength: number): boolean {
+  if (text.length > PARTIAL_REWRITE_MAX_ABS_CHARS) return true;
+  if (text.length > Math.floor(originalLength * 2.6) + 420) return true;
+  return false;
+}
+
+function looksLikeGlobalRestart(candidate: string, original: string): boolean {
+  if (!candidate || !original) return false;
+  const lead = normalizeForSimilarity(original).slice(0, 180);
+  const normalizedCandidate = normalizeForSimilarity(candidate);
+  if (!lead || !normalizedCandidate) return false;
+  return normalizedCandidate.includes(lead) && candidate.length > Math.floor(original.length * 1.7);
+}
+
+function normalizeForSimilarity(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^0-9a-z\uac00-\ud7a3\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function trimToSentenceBoundary(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text.trim();
+  const sliced = text.slice(0, maxChars);
+  const boundary = Math.max(
+    sliced.lastIndexOf('.'),
+    sliced.lastIndexOf('!'),
+    sliced.lastIndexOf('?'),
+    sliced.lastIndexOf('。'),
+    sliced.lastIndexOf('！'),
+    sliced.lastIndexOf('？')
+  );
+
+  if (boundary >= Math.floor(maxChars * 0.5)) {
+    return sliced.slice(0, boundary + 1).trimEnd();
+  }
+
+  const paragraphBoundary = sliced.lastIndexOf('\n\n');
+  if (paragraphBoundary >= Math.floor(maxChars * 0.5)) {
+    return sliced.slice(0, paragraphBoundary).trimEnd();
+  }
+
+  return sliced.trimEnd();
 }

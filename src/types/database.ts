@@ -449,6 +449,87 @@ export type Database = {
           }
         ]
       }
+      episode_generation_traces: {
+        Row: {
+          created_at: string | null
+          episode_id: string | null
+          final_content: string | null
+          generation_mode: string
+          id: string
+          planner_model: string | null
+          planner_output: Json | null
+          project_id: string
+          prose_model: string
+          prose_output: string | null
+          punchup_model: string | null
+          punchup_output: Json | null
+          request_instruction: string | null
+          resolved_mode: string
+          status: string
+          target_episode_number: number
+          trace_payload: Json | null
+          updated_at: string | null
+          validation_summary: Json | null
+        }
+        Insert: {
+          created_at?: string | null
+          episode_id?: string | null
+          final_content?: string | null
+          generation_mode: string
+          id?: string
+          planner_model?: string | null
+          planner_output?: Json | null
+          project_id: string
+          prose_model: string
+          prose_output?: string | null
+          punchup_model?: string | null
+          punchup_output?: Json | null
+          request_instruction?: string | null
+          resolved_mode: string
+          status?: string
+          target_episode_number: number
+          trace_payload?: Json | null
+          updated_at?: string | null
+          validation_summary?: Json | null
+        }
+        Update: {
+          created_at?: string | null
+          episode_id?: string | null
+          final_content?: string | null
+          generation_mode?: string
+          id?: string
+          planner_model?: string | null
+          planner_output?: Json | null
+          project_id?: string
+          prose_model?: string
+          prose_output?: string | null
+          punchup_model?: string | null
+          punchup_output?: Json | null
+          request_instruction?: string | null
+          resolved_mode?: string
+          status?: string
+          target_episode_number?: number
+          trace_payload?: Json | null
+          updated_at?: string | null
+          validation_summary?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "episode_generation_traces_episode_id_fkey"
+            columns: ["episode_id"]
+            isOneToOne: false
+            referencedRelation: "episodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "episode_generation_traces_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       episodes: {
         Row: {
           char_count: number | null
@@ -460,6 +541,7 @@ export type Database = {
           log_last_error: string | null
           log_retry_count: number | null
           log_status: string | null
+          original_content: string | null
           project_id: string
           published_at: string | null
           show_dont_tell_score: number | null
@@ -477,6 +559,7 @@ export type Database = {
           log_last_error?: string | null
           log_retry_count?: number | null
           log_status?: string | null
+          original_content?: string | null
           project_id: string
           published_at?: string | null
           show_dont_tell_score?: number | null
@@ -494,6 +577,7 @@ export type Database = {
           log_last_error?: string | null
           log_retry_count?: number | null
           log_status?: string | null
+          original_content?: string | null
           project_id?: string
           published_at?: string | null
           show_dont_tell_score?: number | null
@@ -514,6 +598,8 @@ export type Database = {
       projects: {
         Row: {
           created_at: string | null
+          generation_config: Json | null
+          generation_mode: string | null
           genre: string | null
           id: string
           status: string | null
@@ -525,6 +611,8 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          generation_config?: Json | null
+          generation_mode?: string | null
           genre?: string | null
           id?: string
           status?: string | null
@@ -536,6 +624,8 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          generation_config?: Json | null
+          generation_mode?: string | null
           genre?: string | null
           id?: string
           status?: string | null

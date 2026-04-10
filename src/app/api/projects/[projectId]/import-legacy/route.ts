@@ -5,6 +5,26 @@ import type { Database } from '@/types/database';
 type WorldBibleInsert = Database['public']['Tables']['world_bibles']['Insert'];
 type CharacterInsert = Database['public']['Tables']['characters']['Insert'];
 type StoryHookInsert = Database['public']['Tables']['story_hooks']['Insert'];
+type EpisodeSynopsisImportRow = {
+  project_id: string;
+  episode_number: number;
+  title: string | null;
+  synopsis: string;
+  goals: string[] | null;
+  key_events: string[] | null;
+  featured_characters: string[] | null;
+  location: string | null;
+  time_context: string | null;
+  arc_name: string | null;
+  arc_position: string | null;
+  foreshadowing: string[] | null;
+  callbacks: string[] | null;
+  notes: string | null;
+  emotion_curve: string | null;
+  ending_image: string | null;
+  forbidden: string | null;
+  scene_beats: string | null;
+};
 
 /**
  * POST /api/projects/[projectId]/import-legacy
@@ -39,6 +59,10 @@ interface LegacyNarrativeData {
     ultimateMystery?: LegacyLayer;
     [key: string]: LegacyLayer | undefined;
   };
+  post_import?: {
+    story_bible_synopses?: unknown;
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -46,6 +70,7 @@ interface ImportResult {
   worldBible: boolean;
   characters: string[];
   storyHooks: string[];
+  synopses: string[];
   errors: string[];
 }
 
@@ -96,7 +121,13 @@ export async function POST(
     if (!legacyData?.layers && (legacyData as Record<string, unknown>)?.project) {
       const projectData = (legacyData as Record<string, unknown>).project as Record<string, unknown>;
       if (projectData?.layers) {
-        legacyData = { layers: projectData.layers as LegacyNarrativeData['layers'] };
+        legacyData = {
+          layers: projectData.layers as LegacyNarrativeData['layers'],
+          post_import:
+            (legacyData as Record<string, unknown>).post_import as LegacyNarrativeData['post_import'] ??
+            (projectData.post_import as LegacyNarrativeData['post_import']) ??
+            undefined,
+        };
       }
     }
 
@@ -111,6 +142,7 @@ export async function POST(
       worldBible: false,
       characters: [],
       storyHooks: [],
+      synopses: [],
       errors: [],
     };
 
@@ -159,6 +191,52 @@ export async function POST(
     // ============================================
 
     // 주인공 (heroArc)
+    const collectCharacterEntries = (raw: unknown): Record<string, unknown>[] => {
+      const out: Record<string, unknown>[] = [];
+      const pushIfCharacter = (value: unknown, fallbackName?: string) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+        const record = { ...(value as Record<string, unknown>) };
+        const nameValue =
+          (typeof record.name === 'string' && record.name.trim()) ||
+          (typeof record['이름'] === 'string' && (record['이름'] as string).trim()) ||
+          (typeof record.characterName === 'string' && record.characterName.trim()) ||
+          (typeof record.title === 'string' && record.title.trim()) ||
+          '';
+        if (!nameValue && fallbackName) {
+          record.name = fallbackName;
+        }
+        const finalName = typeof record.name === 'string' ? record.name.trim() : '';
+        if (finalName) out.push(record);
+      };
+
+      if (Array.isArray(raw)) {
+        raw.forEach((item) => pushIfCharacter(item));
+      } else if (raw && typeof raw === 'object') {
+        const root = raw as Record<string, unknown>;
+        pushIfCharacter(root);
+
+        const listKeys = ['characters', 'members', 'list', 'items', 'profiles', 'cast', 'supportingCharacters'];
+        for (const key of listKeys) {
+          const list = root[key];
+          if (Array.isArray(list)) list.forEach((item) => pushIfCharacter(item));
+        }
+        for (const [key, value] of Object.entries(root)) {
+          if (listKeys.includes(key)) continue;
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            pushIfCharacter(value, key);
+          }
+        }
+      }
+
+      const seen = new Set<string>();
+      return out.filter((entry) => {
+        const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+        if (!name || seen.has(name)) return false;
+        seen.add(name);
+        return true;
+      });
+    };
+
     if (legacyData.layers.heroArc?.data) {
       try {
         const heroData = buildCharacterData(
@@ -266,6 +344,48 @@ export async function POST(
     // ============================================
     // 4. Story Hooks 임포트 (ultimateMystery)
     // ============================================
+    // 보강 파싱: 배열/맵 구조의 캐릭터 데이터 추가 반영
+    const characterLayerRoleMap: Record<string, 'protagonist' | 'antagonist' | 'supporting'> = {
+      heroArc: 'protagonist',
+      villainArc: 'antagonist',
+      supporting: 'supporting',
+      mentor: 'supporting',
+      rival: 'supporting',
+      heroine: 'supporting',
+      sidekick: 'supporting',
+    };
+
+    for (const [layerName, role] of Object.entries(characterLayerRoleMap)) {
+      const layer = legacyData.layers[layerName];
+      if (!layer?.data) continue;
+
+      const entries = collectCharacterEntries(layer.data);
+      for (const entry of entries) {
+        try {
+          const charData = buildCharacterData(entry, projectId, role);
+          if (!charData) continue;
+
+          const { data: existing } = await supabase
+            .from('characters')
+            .select('id')
+            .eq('project_id', projectId)
+            .eq('name', charData.name)
+            .single();
+
+          if (!existing) {
+            const { error } = await supabase
+              .from('characters')
+              .insert(charData);
+            if (error) throw error;
+            const label = role === 'protagonist' ? '주인공' : role === 'antagonist' ? '악역' : '조연';
+            result.characters.push(`${label}: ${charData.name}`);
+          }
+        } catch (e) {
+          result.errors.push(`${layerName} 보강 파싱 실패: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        }
+      }
+    }
+
     if (legacyData.layers.ultimateMystery?.data) {
       try {
         const hooks = buildStoryHooks(
@@ -330,6 +450,28 @@ export async function POST(
       }
     }
 
+    // ============================================
+    // 6. Story Bible synopses import
+    // ============================================
+    try {
+      const synopsisRows = buildEpisodeSynopsisRows(legacyData, projectId);
+      if (synopsisRows.length > 0) {
+        const synopsisUpsert = await upsertEpisodeSynopsisRowsWithFallback(
+          supabase as any,
+          synopsisRows
+        );
+        if (synopsisUpsert.error) throw synopsisUpsert.error;
+        if (synopsisUpsert.warnings.length > 0) {
+          result.errors.push(...synopsisUpsert.warnings);
+        }
+        result.synopses.push(
+          ...synopsisRows.map((row) => `${row.episode_number}화: ${row.title || '제목 없음'}`)
+        );
+      }
+    } catch (e) {
+      result.errors.push(`Story bible synopsis import failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+
     return NextResponse.json({
       success: true,
       message: '레거시 데이터 임포트 완료',
@@ -338,6 +480,7 @@ export async function POST(
         worldBible: result.worldBible ? '성공' : '실패/스킵',
         charactersImported: result.characters.length,
         hooksImported: result.storyHooks.length,
+        synopsesImported: result.synopses.length,
         errorsCount: result.errors.length,
       },
     });
@@ -1096,6 +1239,279 @@ function extractKeywords(text: string): string[] {
 /**
  * GET: API 정보
  */
+function buildEpisodeSynopsisRows(
+  legacyData: LegacyNarrativeData,
+  projectId: string
+): EpisodeSynopsisImportRow[] {
+  const topLevel = legacyData as Record<string, unknown>;
+  const postImport = (legacyData.post_import || {}) as Record<string, unknown>;
+  const storyBibleLayerData =
+    legacyData.layers?.storyBible?.data ||
+    legacyData.layers?.story_bible?.data ||
+    null;
+
+  const candidates: unknown[] = [];
+  candidates.push(postImport.story_bible_synopses);
+  candidates.push(topLevel.story_bible_synopses);
+  candidates.push(topLevel.episode_synopses);
+
+  if (storyBibleLayerData && typeof storyBibleLayerData === 'object') {
+    const layerRecord = storyBibleLayerData as Record<string, unknown>;
+    candidates.push(layerRecord.synopses);
+    candidates.push(layerRecord.episodes);
+    candidates.push(layerRecord.items);
+  } else {
+    candidates.push(storyBibleLayerData);
+  }
+
+  const mergedRows: EpisodeSynopsisImportRow[] = [];
+  const byEpisode = new Map<number, EpisodeSynopsisImportRow>();
+
+  for (const candidate of candidates) {
+    const list = normalizeSynopsisCandidate(candidate);
+    for (const item of list) {
+      const row = mapSynopsisItemToRow(item, projectId, mergedRows.length + 1);
+      if (!row) continue;
+      if (!byEpisode.has(row.episode_number)) {
+        byEpisode.set(row.episode_number, row);
+      }
+    }
+  }
+
+  for (const row of byEpisode.values()) {
+    mergedRows.push(row);
+  }
+
+  return mergedRows.sort((a, b) => a.episode_number - b.episode_number);
+}
+
+function normalizeSynopsisCandidate(input: unknown): Record<string, unknown>[] {
+  if (!input) return [];
+
+  if (Array.isArray(input)) {
+    return input.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
+  }
+
+  if (typeof input === 'object') {
+    const record = input as Record<string, unknown>;
+    const listKeys = ['synopses', 'episodes', 'items', 'story_bible_synopses', 'episode_synopses'];
+    for (const key of listKeys) {
+      const value = record[key];
+      if (Array.isArray(value)) {
+        return value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
+      }
+    }
+  }
+
+  return [];
+}
+
+function mapSynopsisItemToRow(
+  item: Record<string, unknown>,
+  projectId: string,
+  fallbackEpisodeNumber: number
+): EpisodeSynopsisImportRow | null {
+  const episodeNumberRaw =
+    item.episode_number ??
+    item.episodeNumber ??
+    item.number ??
+    item.ep ??
+    fallbackEpisodeNumber;
+
+  const episodeNumber =
+    typeof episodeNumberRaw === 'number'
+      ? Math.trunc(episodeNumberRaw)
+      : Number.parseInt(String(episodeNumberRaw ?? ''), 10);
+
+  const synopsis =
+    sanitizeText(item.synopsis) ||
+    sanitizeText(item.summary) ||
+    sanitizeText(item.description) ||
+    '';
+
+  if (!Number.isFinite(episodeNumber) || episodeNumber < 1 || !synopsis) {
+    return null;
+  }
+
+  return {
+    project_id: projectId,
+    episode_number: episodeNumber,
+    title: sanitizeText(item.title),
+    synopsis,
+    goals: toStringArrayOrNull(item.goals),
+    key_events: toStringArrayOrNull(item.key_events ?? item.keyEvents),
+    featured_characters: toStringArrayOrNull(item.featured_characters ?? item.featuredCharacters),
+    location: sanitizeText(item.location),
+    time_context: sanitizeText(item.time_context ?? item.timeContext),
+    arc_name: sanitizeText(item.arc_name ?? item.arcName),
+    arc_position: sanitizeText(item.arc_position ?? item.arcPosition),
+    foreshadowing: toStringArrayOrNull(item.foreshadowing),
+    callbacks: toStringArrayOrNull(item.callbacks),
+    notes: sanitizeText(item.notes),
+    emotion_curve: sanitizeText(item.emotion_curve ?? item.emotionCurve),
+    ending_image: sanitizeText(item.ending_image ?? item.endingImage),
+    forbidden: sanitizeText(item.forbidden),
+    scene_beats: sanitizeText(item.scene_beats ?? item.sceneBeats),
+  };
+}
+
+function sanitizeText(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function toStringArrayOrNull(value: unknown): string[] | null {
+  if (!value) return null;
+  if (Array.isArray(value)) {
+    const normalized = value
+      .map((item) => (typeof item === 'string' ? item.trim() : String(item ?? '').trim()))
+      .filter(Boolean);
+    return normalized.length > 0 ? normalized : null;
+  }
+  if (typeof value === 'string') {
+    const single = value.trim();
+    return single ? [single] : null;
+  }
+  return null;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === 'string') return record.message;
+    if (typeof record.error_description === 'string') return record.error_description;
+  }
+  return String(error);
+}
+
+function getMissingColumnName(error: unknown): string | null {
+  const message = getErrorMessage(error);
+  const match = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+  return match?.[1] ?? null;
+}
+
+function isOnConflictConstraintError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('no unique or exclusion constraint matching the on conflict specification') ||
+    message.includes('there is no unique or exclusion constraint matching the on conflict specification')
+  );
+}
+
+async function upsertEpisodeSynopsisRowsWithFallback(
+  supabase: any,
+  synopsisRows: EpisodeSynopsisImportRow[]
+): Promise<{ importedCount: number; warnings: string[]; error?: unknown }> {
+  if (synopsisRows.length === 0) {
+    return { importedCount: 0, warnings: [] };
+  }
+
+  const warnings: string[] = [];
+  let payload: Record<string, unknown>[] = synopsisRows.map((row) => ({ ...row }));
+  const optionalColumns = ['arc_position', 'emotion_curve', 'ending_image', 'forbidden', 'scene_beats'];
+
+  while (true) {
+    const { error } = await supabase
+      .from('episode_synopses')
+      .upsert(payload, { onConflict: 'project_id,episode_number' });
+
+    if (!error) {
+      return { importedCount: payload.length, warnings };
+    }
+
+    const missingColumn = getMissingColumnName(error);
+    if (missingColumn && optionalColumns.includes(missingColumn)) {
+      const hasColumn = payload.some((row) => Object.prototype.hasOwnProperty.call(row, missingColumn));
+      if (hasColumn) {
+        warnings.push(`episode_synopses optional column missing: ${missingColumn} (dropped)`);
+        payload = payload.map((row) => {
+          const next = { ...row };
+          delete next[missingColumn];
+          return next;
+        });
+        continue;
+      }
+    }
+
+    if (isOnConflictConstraintError(error)) {
+      warnings.push('episode_synopses fallback: onConflict unavailable, manual merge used');
+      const manual = await manualMergeEpisodeSynopsisRows(supabase, payload);
+      return {
+        importedCount: manual.importedCount,
+        warnings: [...warnings, ...manual.warnings],
+        error: manual.error,
+      };
+    }
+
+    return { importedCount: 0, warnings, error };
+  }
+}
+
+async function manualMergeEpisodeSynopsisRows(
+  supabase: any,
+  payload: Record<string, unknown>[]
+): Promise<{ importedCount: number; warnings: string[]; error?: unknown }> {
+  const warnings: string[] = [];
+  if (payload.length === 0) return { importedCount: 0, warnings };
+
+  const projectId = typeof payload[0].project_id === 'string' ? payload[0].project_id : null;
+  if (!projectId) {
+    return { importedCount: 0, warnings, error: new Error('Missing project_id for synopsis merge') };
+  }
+
+  const episodeNumbers = payload
+    .map((row) => Number(row.episode_number))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  const { data: existingRows, error: existingError } = await supabase
+    .from('episode_synopses')
+    .select('id, episode_number')
+    .eq('project_id', projectId)
+    .in('episode_number', episodeNumbers);
+
+  if (existingError) {
+    return { importedCount: 0, warnings, error: existingError };
+  }
+
+  const existingMap = new Map<number, string>();
+  for (const row of (existingRows || []) as Array<{ id: string; episode_number: number }>) {
+    existingMap.set(row.episode_number, row.id);
+  }
+
+  let importedCount = 0;
+  for (const row of payload) {
+    const episodeNumber = Number(row.episode_number);
+    const existingId = existingMap.get(episodeNumber);
+
+    if (existingId) {
+      const { error } = await supabase
+        .from('episode_synopses')
+        .update(row)
+        .eq('id', existingId);
+      if (error) {
+        warnings.push(`episode ${episodeNumber} update failed: ${getErrorMessage(error)}`);
+        continue;
+      }
+      importedCount += 1;
+      continue;
+    }
+
+    const { error } = await supabase
+      .from('episode_synopses')
+      .insert(row);
+    if (error) {
+      warnings.push(`episode ${episodeNumber} insert failed: ${getErrorMessage(error)}`);
+      continue;
+    }
+    importedCount += 1;
+  }
+
+  return { importedCount, warnings };
+}
+
 export async function GET() {
   return NextResponse.json({
     endpoint: '/api/projects/[projectId]/import-legacy',

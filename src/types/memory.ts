@@ -1,4 +1,5 @@
 import type { Database } from './database';
+import type { GenerationMode } from './generation';
 
 type DBWorldBible = Database['public']['Tables']['world_bibles']['Row'];
 
@@ -81,6 +82,24 @@ export interface EpisodeSynopsis {
   sceneBeats?: string | null;     // PD가 직접 짜주는 씬별 대본 (선택사항)
 }
 
+export interface EpisodeTransitionContract {
+  sourceEpisodeNumber: number;
+  targetEpisodeNumber: number;
+  anchor1: string;
+  anchor2: string;
+  anchor3: string;
+  openingGuardrail?: string | null;
+}
+
+export interface CharacterStateSnapshot {
+  name: string;
+  role: string | null;
+  location: string | null;
+  emotionalState: string | null;
+  injuries: string[];
+  possessedItems: string[];
+}
+
 /**
  * 슬라이딩 윈도우 컨텍스트
  * AI에게 전달될 모든 컨텍스트 정보를 담는 객체
@@ -118,6 +137,8 @@ export interface SlidingWindowContext {
 
   // ★ 에피소드 시놉시스 (Story Bible) - 현재 회차 기준 앞뒤 시놉시스
   episodeSynopses?: EpisodeSynopsis[];
+  transitionContract?: EpisodeTransitionContract | null;
+  previousCharacterSnapshots?: CharacterStateSnapshot[];
 }
 
 /**
@@ -232,12 +253,19 @@ export interface EpisodeGenerationRequest {
   targetEpisodeNumber: number;
   userInstruction: string;
   windowSize?: number;
+  generationMode?: GenerationMode;
+  compareModes?: boolean;
 
   // 선택적: 특정 캐릭터/사건 검색 쿼리 (장기 기억용)
   longTermSearchQueries?: string[];
 
   // 생성 후 DB에 저장할지 여부 (기본값: true)
   saveToDb?: boolean;
+
+  // 이어쓰기 모드 (기존 본문을 유지한 채 뒤를 작성)
+  continueFromExisting?: boolean;
+  existingContent?: string;
+  forceContinue?: boolean;
 }
 
 /**

@@ -1,0 +1,423 @@
+{
+  "template_meta": {
+    "name": "webnovel-studio-import-template",
+    "version": "1.0.0",
+    "compatible_with": [
+      "/api/projects/import-create",
+      "/api/projects/[projectId]/import-legacy"
+    ],
+    "notes": [
+      "The layers object is used directly by project import.",
+      "post_import blocks are optional and can be applied later via each API."
+    ]
+  },
+  "layers": {
+    "world": {
+      "data": {
+        "continentName": "Jade Continent",
+        "worldName": "Chronicles of Ash Blade",
+        "era": "Late Dynasty Era",
+        "geography": "Mountain fortresses, river plains, and ruined border cities define the landscape.",
+        "cities": [
+          {
+            "name": "Haneul Fortress",
+            "description": "A military city guarding the northern pass.",
+            "location": "North Frontier",
+            "significance": "Strategic stronghold"
+          },
+          {
+            "name": "Miryang Port",
+            "description": "A smuggling hub where factions collide.",
+            "location": "Southern coast",
+            "significance": "Trade and espionage center"
+          }
+        ],
+        "landmarks": [
+          {
+            "name": "Blood Cliff",
+            "description": "A battlefield where nobles disappeared."
+          },
+          {
+            "name": "Silent Archive",
+            "description": "A forbidden library sealed by decree."
+          }
+        ],
+        "factions": [
+          {
+            "name": "Imperial Bureau",
+            "description": "Official intelligence arm."
+          },
+          {
+            "name": "Black Reed Guild",
+            "description": "Underworld network controlling docks."
+          }
+        ],
+        "mapDescription": "North is mountainous and militarized, south is maritime and lawless."
+      }
+    },
+    "coreRules": {
+      "data": {
+        "powerSystem": "Body mechanics and disciplined blade forms; no fantasy aura techniques.",
+        "ranks": [
+          "Initiate",
+          "Guard",
+          "Captain",
+          "Master",
+          "Grandmaster"
+        ],
+        "powerSource": "Breath control, tendon strength, timing, and battlefield reading.",
+        "powerLimits": "Injury and stamina strictly limit performance in prolonged conflict.",
+        "rules": [
+          "Story bible facts override all prior model knowledge.",
+          "No modern slang in dialogue.",
+          "No spontaneous fantasy powers.",
+          "Continuity with previous episodes is mandatory."
+        ],
+        "forbidden": [
+          "Laser-like sword beam effects",
+          "Instant world-scale power jumps",
+          "Meta commentary by narrator"
+        ],
+        "magicSystem": {
+          "types": "None",
+          "activation": "N/A",
+          "counters": "N/A",
+          "forbidden": "Any supernatural visual effects"
+        }
+      }
+    },
+    "seeds": {
+      "data": {
+        "themes": [
+          "Revenge versus justice",
+          "Trust under surveillance",
+          "Power and moral debt"
+        ],
+        "conflicts": [
+          "The protagonist must work with a bureau he distrusts.",
+          "A missing ledger can expose both nobles and rebels."
+        ],
+        "tensions": [
+          "Every ally may be an informant.",
+          "Public order versus hidden truth."
+        ],
+        "plotSeeds": [
+          "A burned insignia appears at every major murder scene.",
+          "The mentor refuses to explain the old campaign at Blood Cliff."
+        ]
+      }
+    },
+    "heroArc": {
+      "data": {
+        "name": "Lee Cheongun",
+        "age": 24,
+        "gender": "male",
+        "personality": "Calm, dry, strategic, and stubborn under pressure.",
+        "strengths": [
+          "Situational awareness",
+          "Blade precision",
+          "Interrogation under stress"
+        ],
+        "origin": "Former frontier unit scout",
+        "faction": "Imperial Bureau (temporary assignment)",
+        "coreNarrative": "He investigates the death of his brother while serving the state that betrayed him.",
+        "fatalWeakness": "Cannot walk away from personal debt.",
+        "anxietyConditions": "Freeze response when hearing old war drums.",
+        "goals": [
+          "Find the real killer behind the bureau-sanctioned report.",
+          "Survive political games without losing agency."
+        ],
+        "ultimateGoal": "Reveal the hidden chain of command behind the Blood Cliff purge.",
+        "abilities": [
+          "Close-range sword control",
+          "Rapid terrain reading",
+          "Tracking by residue and footprint pattern"
+        ],
+        "appearance": "Lean build, old forearm scar, restrained expression, weathered coat.",
+        "speechPattern": "Short lines, ironic edge, no emotional overexposure.",
+        "firstAppearanceEpisode": 1
+      }
+    },
+    "villainArc": {
+      "data": {
+        "name": "Chief Inspector Han Myeong",
+        "age": 43,
+        "gender": "male",
+        "personality": "Measured, courteous, manipulative, and patient.",
+        "origin": "Rose from provincial clerk to central command through crisis handling.",
+        "faction": "Imperial Bureau",
+        "coreNarrative": "He preserves order by controlling truth, not by seeking it.",
+        "surfaceGoal": "Protect state stability by suppressing panic.",
+        "ultimateGoal": "Consolidate intelligence power under his private chain of loyalty.",
+        "motivation": "Believes public truth causes civil collapse.",
+        "selfJustification": "Controlled lies prevent larger bloodshed.",
+        "worldMadeMe": "He saw reformists trigger famine through idealism.",
+        "relationship": "Mentor figure in public, strategic opponent in private.",
+        "abilities": [
+          "Political framing",
+          "Witness pressure",
+          "Evidence laundering via protocol"
+        ],
+        "appearance": "Clean uniform, immaculate gloves, unreadable eyes.",
+        "speechPattern": "Polite, indirect, with implied threats."
+      }
+    },
+    "supporting": {
+      "data": {
+        "name": "Seo Yerin",
+        "age": 22,
+        "gender": "female",
+        "personality": "Fast-thinking analyst who masks fear with humor.",
+        "origin": "Archive apprentice from the old capital",
+        "faction": "Silent Archive",
+        "goals": [
+          "Decode the missing ledger cipher",
+          "Protect her displaced family records"
+        ],
+        "appearance": "Ink-stained fingers, practical robe, sharp gaze.",
+        "speechPattern": "Quick, precise, occasionally sarcastic."
+      }
+    },
+    "mentor": {
+      "data": {
+        "name": "Master Gwon",
+        "age": 58,
+        "gender": "male",
+        "personality": "Blunt, disciplined, and unsentimental.",
+        "origin": "Retired frontier instructor",
+        "goals": [
+          "Keep the protagonist alive long enough to choose his own truth"
+        ],
+        "speechPattern": "Sparse words, direct command tone."
+      }
+    },
+    "rival": {
+      "data": {
+        "name": "Jang Dojin",
+        "age": 27,
+        "gender": "male",
+        "personality": "Ambitious officer obsessed with merit and recognition.",
+        "origin": "Central academy dueling champion",
+        "faction": "Imperial Bureau",
+        "goals": [
+          "Outperform the protagonist in every operation"
+        ],
+        "speechPattern": "Formally respectful, subtly provocative."
+      }
+    },
+    "heroine": {
+      "data": {
+        "name": "Hwa Rin",
+        "age": 25,
+        "gender": "female",
+        "personality": "Composed field doctor with strict moral boundaries.",
+        "origin": "Border infirmary survivor",
+        "goals": [
+          "Prevent unnecessary casualties while staying independent"
+        ],
+        "speechPattern": "Gentle but firm, no dramatic flourish."
+      }
+    },
+    "sidekick": {
+      "data": {
+        "name": "Baek Chil",
+        "age": 19,
+        "gender": "male",
+        "personality": "Loyal runner with street instincts.",
+        "origin": "Dock district courier",
+        "goals": [
+          "Earn enough leverage to free his sister from debt bondage"
+        ],
+        "speechPattern": "Fast, practical, occasionally rough."
+      }
+    },
+    "ultimateMystery": {
+      "data": {
+        "surface": "Who burned the bureau witness registry before the hearing?",
+        "truth": "The registry burn was ordered to erase records tied to Blood Cliff survivors.",
+        "hints": [
+          "A rare wax seal appears in two unrelated crime scenes.",
+          "A dead witness had military-grade boot residue on his sleeve."
+        ],
+        "revealTiming": "Arc 2 midpoint",
+        "middleTwists": [
+          "The mentor is listed as dead in official records from 12 years ago.",
+          "The rival unknowingly carries a cipher key fragment."
+        ],
+        "mysteries": [
+          "Why does the chief inspector protect one smuggler route?",
+          "Who keeps moving sealed files out of the archive at dawn?"
+        ],
+        "foreshadowing": [
+          "Every ledger page missing from chapter one links to one forgotten unit.",
+          "A child rhyme in the slums encodes military dispatch timings."
+        ]
+      }
+    }
+  },
+  "post_import": {
+    "story_bible_synopses": [
+      {
+        "episode_number": 1,
+        "title": "Ash on the Stone",
+        "synopsis": "The protagonist wakes in a corpse field operation zone and is forced into a mercy kill that becomes his first moral fracture.",
+        "goals": [
+          "Establish protagonist tone and survival context",
+          "Introduce the old mentor and core tension"
+        ],
+        "key_events": [
+          "Mercy kill scene",
+          "First training cue with non-fantasy blade logic"
+        ],
+        "featured_characters": [
+          "Lee Cheongun",
+          "Master Gwon"
+        ],
+        "location": "Northern cleanup grounds",
+        "time_context": "Late winter dawn",
+        "arc_name": "Arc 1 - The Burned Ledger",
+        "arc_position": "opening",
+        "foreshadowing": [
+          "Unknown insignia on a dead officer's belt"
+        ],
+        "callbacks": [],
+        "emotion_curve": "shock -> suppression -> cold focus",
+        "ending_image": "The training stick cuts air in a bent line.",
+        "forbidden": "No identity reveal of chief inspector's true objective",
+        "scene_beats": "Wake-up, corpse work, mercy kill, cleansing scene, first blade principle."
+      },
+      {
+        "episode_number": 2,
+        "title": "Ledger Dust",
+        "synopsis": "The team traces residue from burned pages to a dock route tied to bureau logistics.",
+        "goals": [
+          "Expand conspiracy scope without full reveal",
+          "Strengthen rivalry and fragile alliance dynamics"
+        ],
+        "key_events": [
+          "Dock surveillance",
+          "Cipher clue discovery"
+        ],
+        "featured_characters": [
+          "Lee Cheongun",
+          "Seo Yerin",
+          "Jang Dojin"
+        ],
+        "location": "Miryang Port",
+        "time_context": "Rainy evening",
+        "arc_name": "Arc 1 - The Burned Ledger",
+        "arc_position": "rising",
+        "foreshadowing": [
+          "Stamped crate with erased military prefix"
+        ],
+        "callbacks": [
+          "Unknown insignia from episode 1"
+        ],
+        "emotion_curve": "control -> suspicion -> urgency",
+        "ending_image": "A sealed crate opens to reveal witness tags.",
+        "forbidden": "No direct confession by main antagonist",
+        "scene_beats": "Port entry, stakeout, clash with rival, crate reveal cliffhanger."
+      }
+    ],
+    "timeline_events": [
+      {
+        "event_name": "Arc 1 - The Burned Ledger",
+        "event_type": "arc",
+        "episode_start": 1,
+        "episode_end": 12,
+        "location": "Capital and north-south route",
+        "main_conflict": "Truth investigation vs institutional suppression",
+        "objectives": [
+          "Find source of witness registry burn",
+          "Protect key witness chain"
+        ],
+        "constraints": [
+          "Political censorship",
+          "Limited trusted allies"
+        ],
+        "foreshadowing_seeds": [
+          "Blood Cliff survivor list fragment"
+        ],
+        "key_characters": [
+          "Lee Cheongun",
+          "Chief Inspector Han Myeong",
+          "Seo Yerin"
+        ],
+        "character_focus": "Lee Cheongun",
+        "tone": "hardboiled suspense",
+        "pacing": "slow-burn to mid-arc acceleration",
+        "importance": 10,
+        "notes": "Do not reveal final command chain before episode 10.",
+        "status": "planned"
+      }
+    ],
+    "writing_memories": [
+      {
+        "feedback_type": "rhythm",
+        "preference_summary": "Avoid excessive staccato sentence chains. Keep paragraph flow natural.",
+        "avoid_patterns": [
+          "One-line paragraphs repeated without semantic grouping",
+          "Direct emotional exposition without physical cues"
+        ],
+        "favor_patterns": [
+          "Connected sentence rhythm with clear action progression",
+          "Show-dont-tell sensory grounding"
+        ],
+        "confidence": 0.8,
+        "is_active": true
+      }
+    ],
+    "style_dna": [
+      {
+        "sourceName": "Baseline Commercial Style",
+        "sourceType": "manual",
+        "proseStyle": "Cold, lean, immersive hardboiled prose with restrained emotion.",
+        "rhythmPattern": "Mix medium-long narrative lines with occasional short impact lines.",
+        "dialogueStyle": "Concise dialogue with subtext and tactical intent.",
+        "emotionExpression": "Express emotion through action, breath, body tension, and silence.",
+        "sceneTransition": "Use sensory anchors and motion continuity for transitions.",
+        "actionDescription": "Anatomy and physics grounded combat, no fantasy aura effects.",
+        "bestSamples": [],
+        "avoidPatterns": [
+          "Over-fragmented line breaks",
+          "Lore dump monologues"
+        ],
+        "favorPatterns": [
+          "Hook in first 5 lines",
+          "Clear ending curiosity per episode"
+        ],
+        "confidence": 0.75
+      }
+    ],
+    "manual_characters": [
+      {
+        "name": "Extra Character Placeholder",
+        "role": "supporting",
+        "age": "31",
+        "gender": "female",
+        "appearance": "Describe visible cues only.",
+        "personality": "Pragmatic and guarded.",
+        "speech_pattern": "Formal but sharp.",
+        "backstory": "Optional",
+        "goals": [
+          "Optional"
+        ]
+      }
+    ],
+    "manual_hooks": [
+      {
+        "hook_type": "foreshadowing",
+        "summary": "Optional manual hook after project creation",
+        "detail": "Use /api/projects/[projectId]/hooks POST if needed.",
+        "keywords": [
+          "optional",
+          "hook"
+        ],
+        "related_character_ids": [],
+        "created_in_episode_number": 1,
+        "importance": 5,
+        "status": "open"
+      }
+    ]
+  }
+}

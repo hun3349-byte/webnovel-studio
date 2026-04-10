@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { getEpisodeEditorPath } from '@/lib/editor/get-episode-editor-path';
 
 interface Episode {
   id: string;
@@ -81,8 +81,9 @@ export default function EpisodesPage() {
       if (!res.ok) throw new Error('Failed to create');
 
       const data = await res.json();
-      // Navigate to the new episode editor
-      router.push(`/projects/${projectId}/episodes/${data.episode.id}`);
+      const nextPath = getEpisodeEditorPath(projectId, data.episode.id);
+      console.log('[EpisodesPage] navigate ->', nextPath);
+      router.push(nextPath);
     } catch {
       alert('에피소드 생성에 실패했습니다.');
       setCreating(false);
@@ -174,9 +175,11 @@ export default function EpisodesPage() {
               <div
                 key={episode.id}
                 className="bg-gray-800 rounded-lg p-4 hover:bg-gray-750 transition cursor-pointer flex items-center justify-between"
-                onClick={() =>
-                  router.push(`/projects/${projectId}/episodes/${episode.id}`)
-                }
+                onClick={() => {
+                  const nextPath = getEpisodeEditorPath(projectId, episode.id);
+                  console.log('[EpisodesPage] navigate ->', nextPath);
+                  router.push(nextPath);
+                }}
               >
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-gray-700 rounded-lg flex items-center justify-center text-lg font-bold">

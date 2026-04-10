@@ -18,6 +18,7 @@ interface Project {
 interface ImportPreview {
   hasWorldBible: boolean;
   characterCount: number;
+  synopsisCount?: number;
   layers: string[];
 }
 
@@ -436,6 +437,7 @@ export default function ProjectsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-blue-400">{importPreview.characterCount}</span>
+                          <span className="text-violet-400 ml-4">{importPreview.synopsisCount ?? 0}</span>
                           <span className="text-gray-300">캐릭터</span>
                         </div>
                       </div>

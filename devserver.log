@@ -1,0 +1,14 @@
+
+> webnovel-studio@0.1.0 dev
+> set TURBOPACK=0 && next dev
+
+⚠ Port 3000 is in use by process 31112, using available port 3001 instead.
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://172.30.1.68:3001
+- Environments: .env.local
+
+✓ Starting...
+⨯ Unable to acquire lock at C:\Users\1\Desktop\webnovel-studio\.next\dev\lock, is another instance of next dev running?
+  Suggestion: If you intended to restart next dev, terminate the other process, and then try again.
+[?25h

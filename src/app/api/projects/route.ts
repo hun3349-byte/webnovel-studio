@@ -96,6 +96,12 @@ export async function POST(request: NextRequest) {
         title: title.trim(),
         genre: genre || null,
         target_platform: target_platform || null,
+        generation_mode: 'claude_legacy',
+        generation_config: {
+          generation_mode: 'claude_legacy',
+          plannerEnabled: false,
+          punchupEnabled: false,
+        },
         status: 'draft',
         total_episodes: 0,
       })

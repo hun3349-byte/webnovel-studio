@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { learnWritingDNAFromFeedback } from '@/core/style/writing-dna';
 
 // GET: 프로젝트의 Writing Memory 목록 조회
 export async function GET(
@@ -113,7 +114,37 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ memory }, { status: 201 });
+    let mergedWritingDNA = null;
+
+    try {
+      const feedbackLines = [
+        body.preference_summary,
+        ...(Array.isArray(body.avoid_patterns)
+          ? body.avoid_patterns.map((pattern: string) => `금지: ${pattern}`)
+          : []),
+        ...(Array.isArray(body.favor_patterns)
+          ? body.favor_patterns.map((pattern: string) => `권장: ${pattern}`)
+          : []),
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const dnaResult = await learnWritingDNAFromFeedback({
+        projectId,
+        feedbackText: feedbackLines,
+        feedbackType: body.feedback_type,
+        preferenceSummary: body.preference_summary || null,
+        avoidPatterns: body.avoid_patterns || [],
+        favorPatterns: body.favor_patterns || [],
+        sourceName: `Writing Memory ${memory.id}`,
+      });
+
+      mergedWritingDNA = dnaResult.mergedDNA;
+    } catch (dnaError) {
+      console.warn('Writing DNA learning warning:', dnaError);
+    }
+
+    return NextResponse.json({ memory, writingDna: mergedWritingDNA }, { status: 201 });
   } catch (error) {
     console.error('Writing memory create API error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

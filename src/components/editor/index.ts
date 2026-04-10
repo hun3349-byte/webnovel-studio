@@ -6,3 +6,4 @@
 export { CharacterStatusBoard } from './CharacterStatusBoard';
 export { StoryBiblePanel } from './StoryBiblePanel';
 export { FloatingEditTooltip } from './FloatingEditTooltip';
+export { EpisodeEditorV2 } from './EpisodeEditorV2';

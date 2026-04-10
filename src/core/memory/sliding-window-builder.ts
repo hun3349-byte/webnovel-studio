@@ -54,6 +54,8 @@ export async function buildSlidingWindowContext(
     timelineEventsResult,
     previousEpisodeResult,
     synopsesResult,
+    transitionContractResult,
+    previousCharacterSnapshotsResult,
   ] = await Promise.all([
     // 1. World Bible 조회
     supabase
@@ -117,6 +119,14 @@ export async function buildSlidingWindowContext(
     // 테이블이 없을 수 있으므로 에러 무시
     includeSynopses
       ? fetchEpisodeSynopses(supabase, projectId, targetEpisodeNumber)
+      : Promise.resolve({ data: [], error: null }),
+
+    targetEpisodeNumber > 1
+      ? fetchTransitionContract(supabase as any, projectId, targetEpisodeNumber)
+      : Promise.resolve({ data: null, error: null }),
+
+    targetEpisodeNumber > 1
+      ? fetchPreviousCharacterSnapshots(supabase as any, projectId, targetEpisodeNumber)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
@@ -263,6 +273,34 @@ export async function buildSlidingWindowContext(
     sceneBeats: syn.scene_beats,
   }));
 
+  const transitionContract =
+    transitionContractResult?.data && typeof transitionContractResult.data === 'object'
+      ? {
+          sourceEpisodeNumber: Number((transitionContractResult.data as any).source_episode_number),
+          targetEpisodeNumber: Number((transitionContractResult.data as any).target_episode_number),
+          anchor1: String((transitionContractResult.data as any).anchor_1 || ''),
+          anchor2: String((transitionContractResult.data as any).anchor_2 || ''),
+          anchor3: String((transitionContractResult.data as any).anchor_3 || ''),
+          openingGuardrail: (transitionContractResult.data as any).opening_guardrail || null,
+        }
+      : null;
+
+  const previousCharacterSnapshots = Array.isArray(previousCharacterSnapshotsResult?.data)
+    ? (previousCharacterSnapshotsResult.data as any[])
+        .map((row) => row?.snapshots)
+        .flat()
+        .filter(Boolean)
+        .slice(0, 30)
+        .map((item) => ({
+          name: String(item.name || ''),
+          role: item.role ?? null,
+          location: item.location ?? null,
+          emotionalState: item.emotionalState ?? null,
+          injuries: Array.isArray(item.injuries) ? item.injuries.map(String) : [],
+          possessedItems: Array.isArray(item.possessedItems) ? item.possessedItems.map(String) : [],
+        }))
+    : [];
+
   // ★★★ 디버깅: 시놉시스 로드 결과 상세 로깅 ★★★
   console.log('[DEBUG] 시놉시스 로드 결과:', {
     count: episodeSynopses.length,
@@ -291,6 +329,9 @@ export async function buildSlidingWindowContext(
     activeTimelineEvents: activeTimelineEvents.length > 0 ? activeTimelineEvents : undefined,
     currentArcSummary,
     episodeSynopses: episodeSynopses.length > 0 ? episodeSynopses : undefined,
+    transitionContract,
+    previousCharacterSnapshots:
+      previousCharacterSnapshots.length > 0 ? previousCharacterSnapshots : undefined,
   };
 }
 
@@ -414,6 +455,63 @@ ${context.lastSceneAnchor}
   return sections.join('\n\n');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchTransitionContract(
+  supabase: any,
+  projectId: string,
+  targetEpisodeNumber: number
+): Promise<{ data: unknown | null; error: unknown }> {
+  try {
+    const result = await supabase
+      .from('episode_transition_contracts')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('target_episode_number', targetEpisodeNumber)
+      .order('source_episode_number', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (result.error) {
+      if (String(result.error.message || '').toLowerCase().includes('does not exist')) {
+        return { data: null, error: null };
+      }
+      return result;
+    }
+
+    return { data: result.data || null, error: null };
+  } catch (_error) {
+    return { data: null, error: null };
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchPreviousCharacterSnapshots(
+  supabase: any,
+  projectId: string,
+  targetEpisodeNumber: number
+): Promise<{ data: unknown[] | null; error: unknown }> {
+  try {
+    const result = await supabase
+      .from('episode_character_snapshots')
+      .select('episode_number, snapshots')
+      .eq('project_id', projectId)
+      .lt('episode_number', targetEpisodeNumber)
+      .order('episode_number', { ascending: false })
+      .limit(1);
+
+    if (result.error) {
+      if (String(result.error.message || '').toLowerCase().includes('does not exist')) {
+        return { data: [], error: null };
+      }
+      return result;
+    }
+
+    return { data: result.data || [], error: null };
+  } catch (_error) {
+    return { data: [], error: null };
+  }
+}
+
 /**
  * 에피소드 시놉시스 조회 헬퍼 함수
  * episode_synopses 테이블이 없을 경우 빈 배열 반환
@@ -452,7 +550,43 @@ async function fetchEpisodeSynopses(
       });
     }
 
-    return result;
+    if (result.error) {
+      return result;
+    }
+
+    const rows = Array.isArray(result.data) ? [...result.data] : [];
+    const hasCurrentEpisode = rows.some(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (row: any) => row?.episode_number === targetEpisodeNumber
+    );
+
+    if (!hasCurrentEpisode) {
+      const currentEpisodeResult = await supabase
+        .from('episode_synopses')
+        .select('*')
+        .eq('project_id', projectId)
+        .eq('episode_number', targetEpisodeNumber)
+        .maybeSingle();
+
+      if (!currentEpisodeResult.error && currentEpisodeResult.data) {
+        rows.push(currentEpisodeResult.data);
+        console.warn('[SYNOPSIS-LOAD] current episode synopsis added via exact fallback query');
+      }
+    }
+
+    const dedupedRows = Array.from(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      new Map(rows.map((row: any) => [row.episode_number, row])).values()
+    )
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .sort((a: any, b: any) => a.episode_number - b.episode_number)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .map((row: any) => ({
+        ...row,
+        synopsis: typeof row.synopsis === 'string' ? row.synopsis.trim() : '',
+      }));
+
+    return { data: dedupedRows, error: null };
   } catch (error) {
     // 테이블이 없거나 에러 발생 시 빈 배열 반환
     console.error('[SYNOPSIS-LOAD] ❌ 예외 발생:', error);

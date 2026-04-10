@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getEpisodeEditorPath } from '@/lib/editor/get-episode-editor-path';
 
 interface Project {
   id: string;
@@ -26,6 +27,7 @@ interface ImportResult {
   worldBible: boolean;
   characters: string[];
   storyHooks: string[];
+  synopses: string[];
   errors: string[];
 }
 
@@ -114,7 +116,9 @@ export default function ProjectDashboardPage() {
       }
 
       const data = await res.json();
-      router.push(`/projects/${projectId}/episodes/${data.episode.id}`);
+      const nextPath = getEpisodeEditorPath(projectId, data.episode.id);
+      console.log('[ProjectDashboardPage] navigate ->', nextPath);
+      router.push(nextPath);
     } catch (error) {
       console.error('Failed to create episode:', error);
       alert('에피소드 생성에 실패했습니다.');

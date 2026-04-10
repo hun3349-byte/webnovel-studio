@@ -1,17 +1,21 @@
-// ============================================================================
-// Feedback Learner - PD 피드백 자동 학습
-// ============================================================================
+import { learnWritingDNAFromFeedback } from '@/core/style/writing-dna';
 
-import { analyzeStyleFromFeedback } from './style-analyzer';
-import { saveStyleDNA, mergeDNAs } from './style-dna-manager';
+interface DiffSignals {
+  originalParagraphs: number;
+  editedParagraphs: number;
+  originalAvgSentenceLength: number;
+  editedAvgSentenceLength: number;
+  originalShortRunCount: number;
+  editedShortRunCount: number;
+  originalDirectEmotionCount: number;
+  editedDirectEmotionCount: number;
+  changeRatio: number;
+}
 
-// ============================================================================
-// 피드백 학습
-// ============================================================================
+const DIRECT_EMOTION_PATTERN = /(분노|슬픔|두려움|공포|절망|기쁨|행복|짜증|불안|초조|놀람|당황|화가 나|무서웠|슬펐|기뻤)/g;
 
 /**
- * PD 피드백에서 StyleDNA 학습
- * 에피소드 채택 시 원본/수정본 비교하여 호출
+ * PD가 AI 원고를 수정한 결과를 학습해서 Writing DNA로 누적한다.
  */
 export async function learnFromFeedback(
   projectId: string,
@@ -19,56 +23,35 @@ export async function learnFromFeedback(
   originalText: string,
   editedText: string
 ): Promise<{ success: boolean; message: string }> {
-  console.log(`[FeedbackLearner] 에피소드 ${episodeNumber} 피드백 학습 시작`);
-
-  // 1. 텍스트 검증
-  if (!originalText || !editedText) {
-    console.log('[FeedbackLearner] 텍스트 누락, 학습 스킵');
-    return { success: false, message: '원본 또는 수정본 텍스트가 없습니다.' };
+  if (!originalText?.trim() || !editedText?.trim()) {
+    return { success: false, message: '원본 또는 수정본 텍스트가 비어 있습니다.' };
   }
 
-  // 2. 변경 비율 체크
-  const changeRatio = calculateChangeRatio(originalText, editedText);
-  console.log(`[FeedbackLearner] 변경 비율: ${(changeRatio * 100).toFixed(1)}%`);
-
-  if (changeRatio < 0.05) {
-    console.log('[FeedbackLearner] 변경이 5% 미만, 학습 스킵');
-    return { success: false, message: '변경이 5% 미만으로 유의미한 차이가 없습니다.' };
-  }
-
-  // 3. 텍스트가 동일한지 체크
   if (originalText.trim() === editedText.trim()) {
-    console.log('[FeedbackLearner] 텍스트 동일, 학습 스킵');
     return { success: false, message: '원본과 수정본이 동일합니다.' };
   }
 
+  const signals = analyzeDiffSignals(originalText, editedText);
+  if (signals.changeRatio < 0.03) {
+    return { success: false, message: '변경량이 작아 학습을 건너뜁니다.' };
+  }
+
+  const feedbackText = buildFeedbackRuleText(signals);
+
   try {
-    // 4. AI로 피드백 분석
-    console.log('[FeedbackLearner] AI 피드백 분석 시작...');
-    const analysis = await analyzeStyleFromFeedback(originalText, editedText);
-
-    // 5. StyleDNA로 저장
-    const sourceName = `PD_피드백_${episodeNumber}화`;
-    const styleDNA = await saveStyleDNA(
+    await learnWritingDNAFromFeedback({
       projectId,
-      sourceName,
-      'pd_feedback',
-      analysis
-    );
+      feedbackText,
+      feedbackType: 'pd_diff',
+      preferenceSummary: `Episode ${episodeNumber} PD edit preference`,
+      sourceName: `PD Feedback Episode ${episodeNumber}`,
+    });
 
-    console.log(`[FeedbackLearner] StyleDNA 저장 완료: ${styleDNA.id}`);
-
-    // 6. 합성 DNA 재생성
-    console.log('[FeedbackLearner] 합성 DNA 재생성...');
-    await mergeDNAs(projectId);
-
-    console.log(`[FeedbackLearner] 에피소드 ${episodeNumber} 학습 완료`);
     return {
       success: true,
-      message: `에피소드 ${episodeNumber}의 PD 피드백을 학습했습니다.`,
+      message: `에피소드 ${episodeNumber} 수정 패턴을 Writing DNA로 반영했습니다.`,
     };
   } catch (error) {
-    console.error('[FeedbackLearner] 학습 실패:', error);
     return {
       success: false,
       message: error instanceof Error ? error.message : '피드백 학습 중 오류가 발생했습니다.',
@@ -77,8 +60,7 @@ export async function learnFromFeedback(
 }
 
 /**
- * 에피소드 채택 시 자동으로 피드백 학습 트리거
- * (비동기로 실행, 채택 프로세스를 블로킹하지 않음)
+ * 채택 시 fire-and-forget으로 피드백 학습을 실행한다.
  */
 export function triggerFeedbackLearning(
   projectId: string,
@@ -86,62 +68,148 @@ export function triggerFeedbackLearning(
   originalText: string | null,
   editedText: string
 ): void {
-  if (!originalText) {
-    console.log('[FeedbackLearner] original_content 없음, 자동 학습 스킵');
+  if (!originalText?.trim()) {
+    console.log('[FeedbackLearner] original_content is empty. Skip feedback learning.');
     return;
   }
 
-  // 비동기로 학습 실행 (fire-and-forget)
-  learnFromFeedback(projectId, episodeNumber, originalText, editedText)
-    .then(result => {
+  void learnFromFeedback(projectId, episodeNumber, originalText, editedText)
+    .then((result) => {
       if (result.success) {
-        console.log(`[FeedbackLearner] 자동 학습 성공: ${result.message}`);
+        console.log(`[FeedbackLearner] ${result.message}`);
       } else {
-        console.log(`[FeedbackLearner] 자동 학습 스킵: ${result.message}`);
+        console.log(`[FeedbackLearner] skipped: ${result.message}`);
       }
     })
-    .catch(error => {
-      console.error('[FeedbackLearner] 자동 학습 실패 (non-critical):', error);
+    .catch((error) => {
+      console.error('[FeedbackLearner] non-critical async failure:', error);
     });
 }
 
-// ============================================================================
-// 유틸리티
-// ============================================================================
-
-/**
- * 텍스트 변경 비율 계산
- */
-function calculateChangeRatio(original: string, edited: string): number {
-  const originalLen = original.length;
-  const editedLen = edited.length;
-
-  if (originalLen === 0) return editedLen > 0 ? 1 : 0;
-
-  // Levenshtein 거리 기반 계산은 비용이 높으므로
-  // 간단하게 길이 변화 + 단어 변화로 추정
-  const lengthChange = Math.abs(originalLen - editedLen) / originalLen;
-
-  // 단어 수 변화
-  const originalWords = original.split(/\s+/).length;
-  const editedWords = edited.split(/\s+/).length;
-  const wordChange = Math.abs(originalWords - editedWords) / originalWords;
-
-  // 두 지표의 평균
-  return (lengthChange + wordChange) / 2;
-}
-
-/**
- * 변경이 유의미한지 판단
- */
 export function hasSignificantChanges(
   originalText: string,
   editedText: string,
-  threshold: number = 0.05
+  threshold = 0.05
 ): boolean {
   if (!originalText || !editedText) return false;
   if (originalText.trim() === editedText.trim()) return false;
+  return calculateChangeRatio(originalText, editedText) >= threshold;
+}
 
-  const ratio = calculateChangeRatio(originalText, editedText);
-  return ratio >= threshold;
+function analyzeDiffSignals(originalText: string, editedText: string): DiffSignals {
+  const originalParagraphs = splitParagraphs(originalText).length;
+  const editedParagraphs = splitParagraphs(editedText).length;
+
+  const originalSentences = splitSentences(originalText);
+  const editedSentences = splitSentences(editedText);
+
+  const originalAvgSentenceLength = averageLength(originalSentences);
+  const editedAvgSentenceLength = averageLength(editedSentences);
+
+  const originalShortRunCount = countConsecutiveShortSentenceRuns(originalSentences);
+  const editedShortRunCount = countConsecutiveShortSentenceRuns(editedSentences);
+
+  const originalDirectEmotionCount = countDirectEmotionWords(originalText);
+  const editedDirectEmotionCount = countDirectEmotionWords(editedText);
+
+  return {
+    originalParagraphs,
+    editedParagraphs,
+    originalAvgSentenceLength,
+    editedAvgSentenceLength,
+    originalShortRunCount,
+    editedShortRunCount,
+    originalDirectEmotionCount,
+    editedDirectEmotionCount,
+    changeRatio: calculateChangeRatio(originalText, editedText),
+  };
+}
+
+function buildFeedbackRuleText(signals: DiffSignals): string {
+  const lines: string[] = [];
+
+  lines.push('다음 규칙을 다음 회차 집필에 반영하라.');
+
+  if (signals.editedShortRunCount < signals.originalShortRunCount) {
+    lines.push('- 단문을 연속으로 나열하지 말고 연결 문장으로 묶어라.');
+  }
+
+  if (signals.editedAvgSentenceLength > signals.originalAvgSentenceLength * 1.08) {
+    lines.push('- 의미가 이어지는 행동과 감각은 한 문장 또는 한 문단으로 자연스럽게 연결하라.');
+  }
+
+  if (signals.editedDirectEmotionCount < signals.originalDirectEmotionCount) {
+    lines.push('- 감정을 직접 설명하지 말고 행동, 시선, 호흡, 촉각 반응으로 보여줘라.');
+  }
+
+  if (signals.editedParagraphs <= signals.originalParagraphs * 0.85) {
+    lines.push('- 불필요한 줄바꿈을 줄이고 문단 호흡을 안정적으로 유지하라.');
+  }
+
+  if (lines.length === 1) {
+    lines.push('- 문단 구조를 유지하면서 어색한 표현만 최소 수정하라.');
+    lines.push('- 문장 리듬과 가독성을 우선하라.');
+  }
+
+  return lines.join('\n');
+}
+
+function calculateChangeRatio(original: string, edited: string): number {
+  const normalizedOriginal = original.trim();
+  const normalizedEdited = edited.trim();
+  if (!normalizedOriginal.length) return normalizedEdited.length > 0 ? 1 : 0;
+
+  const lengthDelta = Math.abs(normalizedOriginal.length - normalizedEdited.length) / normalizedOriginal.length;
+  const paragraphDelta =
+    Math.abs(splitParagraphs(normalizedOriginal).length - splitParagraphs(normalizedEdited).length) /
+    Math.max(1, splitParagraphs(normalizedOriginal).length);
+  const sentenceDelta =
+    Math.abs(splitSentences(normalizedOriginal).length - splitSentences(normalizedEdited).length) /
+    Math.max(1, splitSentences(normalizedOriginal).length);
+
+  return (lengthDelta + paragraphDelta + sentenceDelta) / 3;
+}
+
+function splitParagraphs(text: string): string[] {
+  return text
+    .split(/\n{2,}/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?。！？])\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function averageLength(items: string[]): number {
+  if (items.length === 0) return 0;
+  const total = items.reduce((sum, item) => sum + item.length, 0);
+  return total / items.length;
+}
+
+function countConsecutiveShortSentenceRuns(sentences: string[]): number {
+  let runs = 0;
+  let current = 0;
+
+  for (const sentence of sentences) {
+    const isShort = sentence.length <= 16;
+    if (isShort) {
+      current += 1;
+      if (current === 2) {
+        runs += 1;
+      }
+    } else {
+      current = 0;
+    }
+  }
+
+  return runs;
+}
+
+function countDirectEmotionWords(text: string): number {
+  const matches = text.match(DIRECT_EMOTION_PATTERN);
+  return matches ? matches.length : 0;
 }

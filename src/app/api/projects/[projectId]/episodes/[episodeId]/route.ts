@@ -1,17 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeSerialParagraphs } from '@/lib/editor/serial-normalizer';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { syncCharacterCatalogFromEpisode } from '@/core/memory/character-catalog-worker';
 
 interface RouteParams {
   params: Promise<{ projectId: string; episodeId: string }>;
 }
 
-// GET /api/projects/[projectId]/episodes/[episodeId] - 에피소드 상세 조회
-export async function GET(request: NextRequest, { params }: RouteParams) {
+function normalizeEpisodeContent<T extends { content: string | null; char_count: number | null }>(episode: T): T {
+  if (!episode.content) {
+    return episode;
+  }
+
+  const normalizedContent = normalizeSerialParagraphs(episode.content);
+
+  return {
+    ...episode,
+    content: normalizedContent,
+    char_count: normalizedContent.length,
+  };
+}
+
+// GET /api/projects/[projectId]/episodes/[episodeId] - episode detail
+export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId, episodeId } = await params;
     const supabase = await createServerSupabaseClient();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
     if (authError || !user) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
@@ -30,14 +50,25 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       throw error;
     }
 
-    // 에피소드 로그도 함께 조회
     const { data: log } = await supabase
       .from('episode_logs')
       .select('*')
       .eq('episode_id', episodeId)
       .single();
 
-    return NextResponse.json({ episode: data, log: log || null });
+    const { data: traces } = await supabase
+      .from('episode_generation_traces')
+      .select('id, created_at, generation_mode, resolved_mode, status, trace_payload')
+      .eq('project_id', projectId)
+      .eq('target_episode_number', data.episode_number)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    return NextResponse.json({
+      episode: data ? normalizeEpisodeContent(data) : data,
+      log: log || null,
+      traces: traces || [],
+    });
   } catch (error) {
     console.error('Episode fetch error:', error);
     return NextResponse.json(
@@ -47,36 +78,55 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// PATCH /api/projects/[projectId]/episodes/[episodeId] - 에피소드 수정
+// PATCH /api/projects/[projectId]/episodes/[episodeId] - episode update
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
-  console.log('[Episode PATCH v2] Request received'); // 버전 표시로 캐시 갱신 확인
+  console.log('[Episode PATCH v3] Request received');
 
   try {
     const { projectId, episodeId } = await params;
-    console.log('[Episode PATCH v2] Params:', { projectId, episodeId });
+    console.log('[Episode PATCH v3] Params:', { projectId, episodeId });
 
     const supabase = await createServerSupabaseClient();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
     if (authError || !user) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { title, content, status } = body;
+    const { title, content, status, originalContent } = body;
 
-    const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const updateData: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
 
-    if (title !== undefined) updateData.title = title;
+    if (title !== undefined) {
+      updateData.title = title;
+    }
+
     if (content !== undefined) {
-      updateData.content = content;
-      updateData.char_count = content.length;
-      console.log('[Episode PATCH v2] Saving content:', {
-        charCount: content.length,
-        note: '분량 제한 없음 - 모든 길이 허용'
+      const normalizedContent = normalizeSerialParagraphs(String(content));
+      updateData.content = normalizedContent;
+      updateData.char_count = normalizedContent.length;
+      updateData.log_status = 'pending';
+
+      console.log('[Episode PATCH v3] Saving content:', {
+        charCount: normalizedContent.length,
+        note: 'serial paragraph normalization applied',
       });
     }
-    if (status !== undefined) updateData.status = status;
+
+    if (originalContent !== undefined) {
+      updateData.original_content = normalizeSerialParagraphs(String(originalContent));
+    }
+
+    if (status !== undefined) {
+      updateData.status = status;
+    }
 
     const { data, error } = await supabase
       .from('episodes')
@@ -86,9 +136,49 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
-    return NextResponse.json({ episode: data });
+    const normalizedEpisode = data ? normalizeEpisodeContent(data) : data;
+
+    if (content !== undefined && normalizedEpisode?.content) {
+      const { error: queueError } = await supabase
+        .from('episode_log_queue')
+        .upsert(
+          {
+            episode_id: episodeId,
+            project_id: projectId,
+            queue_status: 'pending',
+            retry_count: 0,
+            max_retries: 3,
+            scheduled_at: new Date().toISOString(),
+            completed_at: null,
+          },
+          { onConflict: 'episode_id' }
+        );
+
+      if (queueError) {
+        console.warn('[Episode PATCH] log queue upsert failed:', queueError);
+      }
+
+      void syncCharacterCatalogFromEpisode({
+        projectId,
+        episodeId,
+        episodeNumber: normalizedEpisode.episode_number,
+        content: normalizedEpisode.content,
+      })
+        .then((result) => {
+          console.log('[Episode PATCH] character catalog sync:', result);
+        })
+        .catch((syncError) => {
+          console.warn('[Episode PATCH] character catalog sync failed:', syncError);
+        });
+    }
+
+    return NextResponse.json({
+      episode: normalizedEpisode,
+    });
   } catch (error) {
     console.error('Episode update error:', error);
     return NextResponse.json(
@@ -98,13 +188,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   }
 }
 
-// DELETE /api/projects/[projectId]/episodes/[episodeId] - 에피소드 삭제
-export async function DELETE(request: NextRequest, { params }: RouteParams) {
+// DELETE /api/projects/[projectId]/episodes/[episodeId] - episode delete
+export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId, episodeId } = await params;
     const supabase = await createServerSupabaseClient();
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
     if (authError || !user) {
       return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 });
     }
@@ -115,7 +209,9 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       .eq('id', episodeId)
       .eq('project_id', projectId);
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

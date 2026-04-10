@@ -14,6 +14,7 @@ import type { WritingPreference } from '@/types/memory';
  */
 
 export interface WritingMemoryContext {
+  memoryIds: string[];
   preferences: WritingPreference[];
   summaryForPrompt: string;
   avoidPatternsForPrompt: string[];
@@ -41,6 +42,7 @@ export async function getWritingMemoryContext(
   if (error) {
     console.error('Writing memory fetch error:', error);
     return {
+      memoryIds: [],
       preferences: [],
       summaryForPrompt: '',
       avoidPatternsForPrompt: [],
@@ -50,6 +52,7 @@ export async function getWritingMemoryContext(
 
   if (!memories || memories.length === 0) {
     return {
+      memoryIds: [],
       preferences: [],
       summaryForPrompt: '',
       avoidPatternsForPrompt: [],
@@ -88,6 +91,7 @@ export async function getWritingMemoryContext(
     : '';
 
   return {
+    memoryIds: memories.map(mem => mem.id),
     preferences,
     summaryForPrompt,
     avoidPatternsForPrompt: Array.from(allAvoidPatterns),
