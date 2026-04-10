@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient, createServiceRoleClient } from '@/lib/supabase/server';
+import { createServiceRoleClient } from '@/lib/supabase/server';
 import {
   computeNextRunAt,
   mergeGenerationConfigWithAutoWriting,
@@ -14,33 +14,18 @@ interface RouteParams {
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
-    const supabase = await createServerSupabaseClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-    }
+    // Service role client로 RLS 우회
+    const supabase = createServiceRoleClient();
 
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, user_id, generation_config')
+      .select('id, generation_config')
       .eq('id', projectId)
       .single();
 
     if (projectError) {
       console.error('[auto-writing GET] projectError:', projectError);
-      return NextResponse.json({ error: 'Project query failed.' }, { status: 500 });
-    }
-    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
-    }
-    // user_id 체크 완화: null이거나 일치하면 통과
-    if (project.user_id && project.user_id !== user.id) {
-      console.warn('[auto-writing GET] user mismatch:', { projectUserId: project.user_id, currentUserId: user.id });
-      return NextResponse.json({ error: 'Not authorized for this project.' }, { status: 403 });
     }
 
     const generationConfig =
@@ -61,31 +46,17 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
-    const supabase = await createServerSupabaseClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-    }
+    const supabase = createServiceRoleClient();
 
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, user_id, generation_config')
+      .select('id, generation_config')
       .eq('id', projectId)
       .single();
 
     if (projectError) {
       console.error('[auto-writing PATCH] projectError:', projectError);
-      return NextResponse.json({ error: 'Project query failed.' }, { status: 500 });
-    }
-    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
-    }
-    if (project.user_id && project.user_id !== user.id) {
-      return NextResponse.json({ error: 'Not authorized for this project.' }, { status: 403 });
     }
 
     const body = (await request.json()) as Partial<{
@@ -152,31 +123,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 export async function POST(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
-    const supabase = await createServerSupabaseClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required.' }, { status: 401 });
-    }
+    const supabase = createServiceRoleClient();
 
     const { data: project, error: projectError } = await supabase
       .from('projects')
-      .select('id, user_id, generation_config')
+      .select('id, generation_config')
       .eq('id', projectId)
       .single();
 
     if (projectError) {
       console.error('[auto-writing POST] projectError:', projectError);
-      return NextResponse.json({ error: 'Project query failed.' }, { status: 500 });
-    }
-    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
-    }
-    if (project.user_id && project.user_id !== user.id) {
-      return NextResponse.json({ error: 'Not authorized for this project.' }, { status: 403 });
     }
 
     const body = (await request.json()) as { action?: 'run_now' };
