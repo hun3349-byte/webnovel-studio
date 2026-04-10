@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { normalizeSerialParagraphs, trimReplayRestart } from '@/lib/editor/serial-normalizer';
+import { normalizeSerialParagraphs, trimReplayRestart, formatForNaverMobile } from '@/lib/editor/serial-normalizer';
 
 type Tab = 'setup' | 'workspace';
 type Flow = 'idle' | 'drafting' | 'drafted' | 'validating' | 'validation_passed' | 'validation_failed' | 'revising' | 'saving' | 'saved';
@@ -928,7 +928,21 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                  <h3 className="mb-2 text-sm font-semibold">본문 원고 (Claude Draft)</h3>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold">본문 원고 (Claude Draft)</h3>
+                    <button
+                      onClick={() => {
+                        const formatted = formatForNaverMobile(content);
+                        setContent(formatted);
+                        if (report) setReport({ ...report, stale: true });
+                        setStatus('네이버 모바일 포맷 적용 완료');
+                      }}
+                      disabled={busy || !content.trim()}
+                      className="rounded-lg border border-sky-500/50 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-200 hover:bg-sky-500/20 disabled:opacity-50"
+                    >
+                      네이버 포맷
+                    </button>
+                  </div>
                   <textarea
                     ref={editorRef}
                     value={content}
