@@ -5,6 +5,28 @@ interface RouteParams {
   params: Promise<{ projectId: string }>;
 }
 
+function isRecoverableSchemaError(error: {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+} | null | undefined): boolean {
+  const code = String(error?.code || '').toUpperCase();
+  if (code === '42P01' || code === '42703') return true;
+
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    text.includes('does not exist') ||
+    text.includes('relation') ||
+    text.includes('column') ||
+    text.includes('episode_transition_contracts')
+  );
+}
+
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
@@ -47,7 +69,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 
     const { data, error } = await query;
     if (error) {
-      if (String(error.message || '').toLowerCase().includes('does not exist')) {
+      if (isRecoverableSchemaError(error)) {
         return NextResponse.json({ contract: null });
       }
       throw error;
@@ -108,7 +130,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       .single();
 
     if (error) {
-      if (String(error.message || '').toLowerCase().includes('does not exist')) {
+      if (isRecoverableSchemaError(error)) {
         return NextResponse.json({ error: 'transition_contract_table_missing' }, { status: 503 });
       }
       throw error;
@@ -122,4 +144,3 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     );
   }
 }
-

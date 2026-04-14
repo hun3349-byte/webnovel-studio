@@ -11,6 +11,24 @@ interface RouteParams {
   params: Promise<{ projectId: string }>;
 }
 
+function isProjectNotFoundError(error: { code?: string | null } | null | undefined): boolean {
+  return String(error?.code || '') === 'PGRST116';
+}
+
+function isMissingGenerationConfigColumnError(error: {
+  code?: string | null;
+  message?: string | null;
+  details?: string | null;
+  hint?: string | null;
+} | null | undefined): boolean {
+  if (String(error?.code || '').toUpperCase() !== '42703') return false;
+  const text = [error?.message, error?.details, error?.hint]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return text.includes('generation_config');
+}
+
 export async function GET(_request: NextRequest, { params }: RouteParams) {
   try {
     const { projectId } = await params;
@@ -25,6 +43,27 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
     if (projectError) {
       console.error('[auto-writing GET] projectError:', projectError);
+      if (isProjectNotFoundError(projectError)) {
+        return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+      }
+      if (isMissingGenerationConfigColumnError(projectError)) {
+        return NextResponse.json({
+          autoWriting: normalizeAutoWritingConfig(undefined),
+          unsupported: true,
+          reason: 'generation_config_column_missing',
+        });
+      }
+      return NextResponse.json(
+        {
+          error: 'Failed to load auto writing config.',
+          details: projectError.message,
+          code: projectError.code,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
 
@@ -56,6 +95,29 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
     if (projectError) {
       console.error('[auto-writing PATCH] projectError:', projectError);
+      if (isProjectNotFoundError(projectError)) {
+        return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+      }
+      if (isMissingGenerationConfigColumnError(projectError)) {
+        return NextResponse.json(
+          {
+            error: 'auto_writing_unavailable',
+            reason: 'generation_config_column_missing',
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error: 'Failed to load auto writing config.',
+          details: projectError.message,
+          code: projectError.code,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
 
@@ -133,6 +195,29 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
 
     if (projectError) {
       console.error('[auto-writing POST] projectError:', projectError);
+      if (isProjectNotFoundError(projectError)) {
+        return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
+      }
+      if (isMissingGenerationConfigColumnError(projectError)) {
+        return NextResponse.json(
+          {
+            error: 'auto_writing_unavailable',
+            reason: 'generation_config_column_missing',
+          },
+          { status: 503 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error: 'Failed to load auto writing config.',
+          details: projectError.message,
+          code: projectError.code,
+        },
+        { status: 500 }
+      );
+    }
+
+    if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
 
