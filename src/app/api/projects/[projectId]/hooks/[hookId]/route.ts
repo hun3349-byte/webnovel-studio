@@ -29,6 +29,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if (body.importance !== undefined) updateData.importance = body.importance;
     if (body.hook_type !== undefined) updateData.hook_type = body.hook_type;
     if (body.keywords !== undefined) updateData.keywords = body.keywords;
+    // Phase 2: 예상 회수 회차 추가
+    if (body.target_resolution_episode !== undefined) {
+      updateData.target_resolution_episode = body.target_resolution_episode;
+    }
 
     const { data, error } = await supabase
       .from('story_hooks')

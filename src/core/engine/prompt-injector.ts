@@ -1,4 +1,4 @@
-import type { ActiveCharacter, SlidingWindowContext } from '@/types/memory';
+import type { ActiveCharacter, SlidingWindowContext, ArcStructureSummary, EnhancedUnresolvedHook } from '@/types/memory';
 
 const WRITER_PERSONA = `
 <writer_persona>
@@ -178,6 +178,135 @@ function buildStoryBibleOverrideSection(
   }
 
   lines.push('</story_bible_override>');
+  return lines.join('\n');
+}
+
+/**
+ * 전체 아크 구조 섹션 빌드 (Phase 1: 일관성 개선)
+ * AI가 현재 회차가 전체 스토리에서 어디에 위치하는지 인지하도록 함
+ */
+function buildArcStructureSection(
+  arcStructure: ArcStructureSummary | undefined,
+  targetEpisodeNumber: number
+): string {
+  if (!arcStructure || arcStructure.arcs.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = ['<arc_structure>'];
+
+  // 1. 전체 구조 요약
+  lines.push('[전체 구조]');
+  lines.push(`총 예정 회차: ${arcStructure.totalPlannedEpisodes}화`);
+  lines.push(`작성 완료: ${arcStructure.totalWrittenEpisodes}화`);
+  lines.push(`현재 위치: ${targetEpisodeNumber}화 (전체 ${arcStructure.progressPercent}% 진행)`);
+  lines.push('');
+
+  // 2. 아크 목록
+  lines.push('[아크 목록]');
+  for (const arc of arcStructure.arcs) {
+    const statusIcon = arc.status === 'completed' ? '✅' :
+                       arc.status === 'in_progress' ? '🔄' : '📋';
+    const currentMarker = arc.status === 'in_progress' ? ' ← 현재' : '';
+    lines.push(
+      `- ${statusIcon} ${arc.arcName} (${arc.episodeStart}~${arc.episodeEnd}화, ${arc.episodeCount}화)${currentMarker}`
+    );
+    if (arc.summary && arc.status !== 'completed') {
+      lines.push(`  └ ${arc.summary}`);
+    }
+  }
+  lines.push('');
+
+  // 3. 현재 아크 상세
+  if (arcStructure.currentArc) {
+    const ca = arcStructure.currentArc;
+    lines.push('[현재 아크 상세]');
+    lines.push(`아크명: ${ca.name}`);
+    lines.push(`진행 상황: ${ca.episodeInArc}/${ca.totalEpisodesInArc}화 (${ca.progressPercent}%)`);
+    lines.push(`남은 회차: ${ca.remainingEpisodes}화`);
+
+    // 위치 설명
+    const positionDesc: Record<string, string> = {
+      'start': '도입부 - 설정과 인물 소개 중심',
+      'rising': '상승부 - 갈등 고조, 긴장감 증가',
+      'climax': '클라이맥스 - 핵심 대결/전환점',
+      'falling': '하강부 - 갈등 해소, 여운',
+      'end': '종결부 - 마무리와 다음 아크 복선',
+    };
+    lines.push(`위치: ${ca.position} (${positionDesc[ca.position] || ca.position})`);
+  }
+
+  lines.push('</arc_structure>');
+  return lines.join('\n');
+}
+
+/**
+ * 복선 맵 섹션 빌드 (Phase 2: 일관성 개선)
+ * 미해결 떡밥과 예상 회수 시점을 명시하여 누락 방지
+ */
+function buildForeshadowingMapSection(
+  enhancedHooks: EnhancedUnresolvedHook[] | undefined,
+  targetEpisodeNumber: number
+): string {
+  if (!enhancedHooks || enhancedHooks.length === 0) {
+    return '';
+  }
+
+  // 긴급도별 분류
+  const overdue = enhancedHooks.filter(h => h.urgency === 'overdue');
+  const dueNow = enhancedHooks.filter(h => h.urgency === 'due_now');
+  const approaching = enhancedHooks.filter(h => h.urgency === 'approaching');
+  const future = enhancedHooks.filter(h => h.urgency === 'future');
+
+  // 회수 필요한 것이 없으면 간략 버전
+  if (overdue.length === 0 && dueNow.length === 0 && approaching.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = ['<foreshadowing_map>'];
+
+  // 1. 회수 필요 (지금)
+  if (overdue.length > 0 || dueNow.length > 0) {
+    lines.push('[회수 필요 - 지금]');
+    for (const hook of [...overdue, ...dueNow]) {
+      const target = hook.targetResolutionEpisode;
+      const overdueMarker = hook.isOverdue ? ' ⚠️ 지연됨' : '';
+      lines.push(
+        `- [중요도 ${hook.importance}] ${hook.summary} (${hook.createdInEpisodeNumber}화 설치 → ${target}화 회수 예정)${overdueMarker}`
+      );
+    }
+    lines.push('');
+  }
+
+  // 2. 회수 임박 (3화 이내)
+  if (approaching.length > 0) {
+    lines.push('[회수 임박 - 3화 이내]');
+    for (const hook of approaching) {
+      const target = hook.targetResolutionEpisode;
+      const remaining = hook.episodesUntilDue;
+      lines.push(
+        `- [중요도 ${hook.importance}] ${hook.summary} (${hook.createdInEpisodeNumber}화 설치 → ${target}화 예정, ${remaining}화 남음)`
+      );
+    }
+    lines.push('');
+  }
+
+  // 3. 장기 복선 (상위 5개만)
+  if (future.length > 0) {
+    lines.push('[장기 복선]');
+    const topFuture = future
+      .sort((a, b) => b.importance - a.importance)
+      .slice(0, 5);
+    for (const hook of topFuture) {
+      const target = hook.targetResolutionEpisode;
+      const targetStr = target ? `→ ${target}화 예정` : '→ 회수 시점 미정';
+      lines.push(
+        `- [중요도 ${hook.importance}] ${hook.summary} (${hook.createdInEpisodeNumber}화 설치 ${targetStr})`
+      );
+    }
+  }
+
+  lines.push('</foreshadowing_map>');
   return lines.join('\n');
 }
 
@@ -512,6 +641,14 @@ export function buildUserPromptV9(
   const sections: string[] = [];
   sections.push(buildStoryBibleOverrideSection(context, targetEpisodeNumber));
 
+  // ★ Phase 1: 전체 아크 구조 주입 (일관성 개선)
+  const arcSection = buildArcStructureSection(context.arcStructure, targetEpisodeNumber);
+  if (arcSection) sections.push(arcSection);
+
+  // ★ Phase 2: 복선 맵 주입 (일관성 개선)
+  const foreshadowingSection = buildForeshadowingMapSection(context.enhancedHooks, targetEpisodeNumber);
+  if (foreshadowingSection) sections.push(foreshadowingSection);
+
   if (targetEpisodeNumber > 1) {
     const previousEnding = buildPreviousEndingSection(context);
     if (previousEnding) sections.push(previousEnding);
@@ -551,6 +688,10 @@ export function buildUserPromptV9(
     targetEpisodeNumber,
     startsWithStoryBibleOverride: prompt.startsWith('<story_bible_override>'),
     hasSynopsis: prompt.includes('<episode_synopsis'),
+    hasArcStructure: prompt.includes('<arc_structure>'),
+    hasForeshadowingMap: prompt.includes('<foreshadowing_map>'),
+    currentArc: context.arcStructure?.currentArc?.name || 'none',
+    urgentHooksCount: context.enhancedHooks?.filter(h => h.urgency === 'due_now' || h.urgency === 'overdue').length || 0,
     recentLogCount: context.recentLogs.length,
   });
   return prompt;

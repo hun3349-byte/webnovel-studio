@@ -101,6 +101,8 @@ export async function POST(
         created_in_episode_number: body.created_in_episode_number,
         importance: body.importance || 5,
         status: body.status || 'open',
+        // Phase 2: 예상 회수 회차 추가
+        target_resolution_episode: body.target_resolution_episode || null,
       })
       .select()
       .single();

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSerialParagraphs } from '@/lib/editor/serial-normalizer';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { syncCharacterCatalogFromEpisode } from '@/core/memory/character-catalog-worker';
+import { learnFromEpisodeEdit, computeDiffRatio } from '@/core/style/auto-dna-learner';
 
 interface RouteParams {
   params: Promise<{ projectId: string; episodeId: string }>;
@@ -174,6 +175,30 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         .catch((syncError) => {
           console.warn('[Episode PATCH] character catalog sync failed:', syncError);
         });
+
+      // Phase 4: 자동 DNA 학습
+      // original_content가 있고, 5-50% 변경 시 학습 트리거
+      const existingOriginal = normalizedEpisode.original_content;
+      if (existingOriginal && typeof existingOriginal === 'string') {
+        const diffRatio = computeDiffRatio(existingOriginal, normalizedEpisode.content);
+        if (diffRatio > 0.05 && diffRatio < 0.5) {
+          // 비동기로 학습 (저장 블로킹 안 함)
+          learnFromEpisodeEdit(projectId, existingOriginal, normalizedEpisode.content)
+            .then((result) => {
+              if (result.learned) {
+                console.log('[Episode PATCH] Auto DNA learned:', {
+                  patternsCount: result.patternsCount,
+                  diffRatio: result.diffRatio,
+                });
+              } else {
+                console.log('[Episode PATCH] Auto DNA skipped:', result.reason);
+              }
+            })
+            .catch((learnError) => {
+              console.warn('[Episode PATCH] Auto DNA learning failed:', learnError);
+            });
+        }
+      }
     }
 
     return NextResponse.json({

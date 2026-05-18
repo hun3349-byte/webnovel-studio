@@ -31,7 +31,7 @@ export interface StyleDNA extends StyleDNAElement {
   id: string;
   projectId: string;
   sourceName: string;                 // "화산귀환", "PD_피드백_12화"
-  sourceType: 'reference' | 'pd_feedback' | 'manual';
+  sourceType: 'reference' | 'pd_feedback' | 'manual' | 'auto_learned';
   bestSamples: BestSample[];
   avoidPatterns: string[];            // 피해야 할 패턴
   favorPatterns: string[];            // 권장 패턴
@@ -69,7 +69,7 @@ export interface StyleAnalysisRequest {
   projectId: string;
   text: string;                       // 분석할 텍스트 (레퍼런스 소설 샘플)
   sourceName: string;                 // 출처 이름
-  sourceType?: 'reference' | 'pd_feedback' | 'manual';
+  sourceType?: 'reference' | 'pd_feedback' | 'manual' | 'auto_learned';
 }
 
 /**

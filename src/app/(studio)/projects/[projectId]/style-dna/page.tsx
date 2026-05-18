@@ -8,7 +8,7 @@ interface StyleDNA {
   id: string;
   projectId: string;
   sourceName: string;
-  sourceType: 'reference' | 'pd_feedback' | 'manual';
+  sourceType: 'reference' | 'pd_feedback' | 'manual' | 'auto_learned';
   proseStyle: string | null;
   rhythmPattern: string | null;
   dialogueStyle: string | null;

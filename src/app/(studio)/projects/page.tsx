@@ -32,6 +32,7 @@ export default function ProjectsPage() {
   const [newGenre, setNewGenre] = useState('');
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
 
   // 탭 및 JSON Import 상태
   const [activeTab, setActiveTab] = useState<'empty' | 'import'>('empty');
@@ -235,6 +236,36 @@ export default function ProjectsPage() {
     }
   };
 
+  const handleDuplicateProject = async (project: Project) => {
+    if (!confirm(`"${project.title}" 프로젝트를 복사하시겠습니까?\n(설정만 복사되고, 에피소드는 새로 시작합니다)`)) return;
+
+    try {
+      setDuplicating(project.id);
+      const res = await fetch(`/api/projects/${project.id}/duplicate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+
+      const summary = result.summary;
+      alert(
+        `프로젝트 복사 완료!\n\n` +
+        `- 세계관: ${summary.worldBible ? '복사됨' : '없음'}\n` +
+        `- 캐릭터: ${summary.characters}명\n` +
+        `- 캐릭터 관계: ${summary.characterRelationships}개\n` +
+        `- 타임라인: ${summary.timelineEvents}개`
+      );
+
+      loadProjects();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '복사에 실패했습니다.');
+    } finally {
+      setDuplicating(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -303,15 +334,27 @@ export default function ProjectsPage() {
               >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-semibold text-lg">{project.title}</h3>
-                  <button
-                    onClick={e => {
-                      e.preventDefault();
-                      handleDeleteProject(project);
-                    }}
-                    className="text-gray-500 hover:text-red-400 transition text-sm"
-                  >
-                    삭제
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={e => {
+                        e.preventDefault();
+                        handleDuplicateProject(project);
+                      }}
+                      disabled={duplicating === project.id}
+                      className="text-gray-500 hover:text-blue-400 transition text-sm disabled:opacity-50"
+                    >
+                      {duplicating === project.id ? '복사 중...' : '복사'}
+                    </button>
+                    <button
+                      onClick={e => {
+                        e.preventDefault();
+                        handleDeleteProject(project);
+                      }}
+                      className="text-gray-500 hover:text-red-400 transition text-sm"
+                    >
+                      삭제
+                    </button>
+                  </div>
                 </div>
                 {project.genre && (
                   <span className="inline-block px-2 py-1 bg-gray-700 rounded text-xs text-gray-300 mb-3">

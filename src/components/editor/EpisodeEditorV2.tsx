@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { normalizeSerialParagraphs, trimReplayRestart, formatForNaverMobile } from '@/lib/editor/serial-normalizer';
 
-type Tab = 'setup' | 'workspace';
+type Tab = 'setup' | 'workspace' | 'dashboard';
 type Flow = 'idle' | 'drafting' | 'drafted' | 'validating' | 'validation_passed' | 'validation_failed' | 'revising' | 'saving' | 'saved';
 type CheckId = 'sentence_split' | 'consistency' | 'continuity' | 'show_not_tell' | 'vocabulary';
 
@@ -13,7 +13,14 @@ interface Episode { id: string; episode_number: number; title: string | null; co
 interface World { id?: string; world_name: string | null; time_period: string | null; geography: string | null; absolute_rules: string[] | null; forbidden_elements: string[] | null; }
 interface Character { id?: string; name: string; role: string | null; personality: string | null; }
 interface Synopsis { id?: string; episode_number: number; synopsis: string; key_events: string[] | null; forbidden?: string | null; }
-interface Hook { id?: string; summary: string; detail: string | null; status: string | null; importance: number | null; hook_type: string | null; }
+interface Hook { id?: string; summary: string; detail: string | null; status: string | null; importance: number | null; hook_type: string | null; target_resolution_episode?: number | null; created_in_episode_number?: number; }
+interface ArcStructure {
+  totalPlannedEpisodes: number;
+  totalWrittenEpisodes: number;
+  progressPercent: number;
+  arcs: Array<{ arcName: string; episodeStart: number; episodeEnd: number; status: string; summary: string; }>;
+  currentArc: { name: string; position: string; remainingEpisodes: number; progressPercent: number; episodeInArc: number; totalEpisodesInArc: number; } | null;
+}
 interface Check { id: CheckId; label: string; passed: boolean; score: number; comment: string; }
 interface Report { passed: boolean; overallScore: number; summary: string; checks: Check[]; suggestions: string[]; model: string; stale: boolean; }
 interface AutoWritingConfig {
@@ -170,6 +177,14 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
   const [autoBusy, setAutoBusy] = useState(false);
   const [partialBusy, setPartialBusy] = useState(false);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
+  // Phase 3: 씬 기반 작성 모드
+  const [sceneMode, setSceneMode] = useState(false);
+  const [sceneBeats, setSceneBeats] = useState<[string, string, string, string]>(['', '', '', '']);
+  const [sceneBusy, setSceneBusy] = useState(false);
+  const [sceneProgress, setSceneProgress] = useState<{ current: number; total: number } | null>(null);
+  // Phase 1-2: 아크 구조 & 복선 맵
+  const [arcStructure, setArcStructure] = useState<ArcStructure | null>(null);
+  const [hooksSaving, setHooksSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -201,6 +216,14 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
         setSynopsis(cur ? { ...cur, key_events: cur.key_events ?? [], forbidden: cur.forbidden ?? '' } : { episode_number: ep.episode_number, synopsis: '', key_events: [], forbidden: '' });
       } else setSynopsis({ episode_number: ep.episode_number, synopsis: '', key_events: [], forbidden: '' });
       setHooks(hooksRes.ok ? (await hooksRes.json()).hooks ?? [] : []);
+      // Phase 1: 아크 구조 fetch
+      try {
+        const arcRes = await fetch(`/api/projects/${projectId}/arc-structure?episodeNumber=${ep.episode_number}`);
+        if (arcRes.ok) {
+          const arcData = await arcRes.json();
+          setArcStructure(arcData.arcStructure ?? null);
+        }
+      } catch { /* arc structure is optional */ }
       if (autoR.ok) {
         const autoJ = await autoR.json();
         if (autoJ?.autoWriting) {
@@ -547,6 +570,93 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
     await generate(pd.trim() || 'Write this episode using current setup.');
   }, [generate, pd]);
 
+  // Phase 3: 씬 기반 생성
+  const generateWithScenes = useCallback(async () => {
+    if (!episode) return;
+    const emptyBeats = sceneBeats.filter((b) => !b.trim());
+    if (emptyBeats.length > 0) {
+      setError('모든 씬 비트(4개)를 입력해주세요.');
+      return;
+    }
+
+    setSceneBusy(true);
+    setSceneProgress({ current: 0, total: 4 });
+    setFlow('drafting');
+    setStatus('씬 기반 작성 시작...');
+    setError(null);
+    setReport(null);
+
+    try {
+      const res = await fetch('/api/ai/generate-prose-scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          episodeId: episode.id,
+          targetEpisodeNumber: episode.episode_number,
+          userInstruction: pd.trim() || 'Write this episode using current setup.',
+          sceneBeats,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || '씬 기반 생성 실패');
+      }
+
+      const payload = await res.json();
+      const finalText = clean(payload.fullText || '');
+      setContent(finalText);
+      setOriginal(finalText);
+      setFlow('drafted');
+      setStatus(`씬 기반 생성 완료 (${payload.totalCharCount?.toLocaleString() || finalText.length.toLocaleString()}자). 검수 중...`);
+      await validate(finalText);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '씬 기반 생성 실패');
+      setFlow(content.trim() ? 'drafted' : 'idle');
+    } finally {
+      setSceneBusy(false);
+      setSceneProgress(null);
+    }
+  }, [content, episode, pd, projectId, sceneBeats, validate]);
+
+  // Phase 2: 복선 개별 저장 (target_resolution_episode 포함)
+  const saveHook = useCallback(async (hook: Hook, index: number) => {
+    if (!hook.id || !hook.summary.trim()) return;
+    setHooksSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/hooks/${hook.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          summary: hook.summary,
+          detail: hook.detail,
+          status: hook.status,
+          importance: hook.importance,
+          target_resolution_episode: hook.target_resolution_episode,
+        }),
+      });
+      if (!res.ok) throw new Error('Failed to save hook');
+      setStatus(`복선 "${hook.summary.slice(0, 20)}..." 저장 완료`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Hook save failed');
+    } finally {
+      setHooksSaving(false);
+    }
+  }, [projectId]);
+
+  // 복선 긴급도 계산
+  const getHookUrgency = useCallback((hook: Hook): { label: string; color: string } => {
+    if (!episode) return { label: '미정', color: 'slate' };
+    const target = hook.target_resolution_episode;
+    const current = episode.episode_number;
+    if (!target) return { label: '미정', color: 'slate' };
+    if (target < current) return { label: '⚠️ 지연', color: 'rose' };
+    if (target === current) return { label: '🔥 지금', color: 'amber' };
+    if (target <= current + 3) return { label: '⏰ 임박', color: 'yellow' };
+    return { label: '📋 예정', color: 'sky' };
+  }, [episode]);
+
   const saveAutoWritingConfig = useCallback(async (patch?: Partial<AutoWritingConfig>) => {
     setAutoBusy(true);
     setError(null);
@@ -714,7 +824,7 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
   );
 
   if (loading || !episode || !synopsis) return <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-200">Loading editor...</div>;
-  const busy = flow === 'drafting' || flow === 'validating' || flow === 'saving' || partialBusy;
+  const busy = flow === 'drafting' || flow === 'validating' || flow === 'saving' || partialBusy || sceneBusy;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -733,6 +843,7 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
             <div className="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm text-slate-300">Chars {content.length.toLocaleString()}</div>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={() => setTab('dashboard')} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === 'dashboard' ? 'bg-emerald-500 text-black' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>📊 대시보드</button>
             <button onClick={() => setTab('workspace')} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === 'workspace' ? 'bg-indigo-500 text-black' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>집필 탭</button>
             <button onClick={() => setTab('setup')} className={`rounded-lg px-4 py-2 text-sm font-medium transition ${tab === 'setup' ? 'bg-indigo-500 text-black' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>기획 탭</button>
           </div>
@@ -841,6 +952,184 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
           </section>
         )}
 
+        {tab === 'dashboard' && (
+          <section className="space-y-4">
+            {/* 아크 구조 표시 */}
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-5">
+              <h2 className="mb-3 text-base font-semibold text-emerald-200">📍 현재 위치 (아크 구조)</h2>
+              {arcStructure ? (
+                <div className="space-y-3">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+                      <div className="text-xs text-slate-400">전체 진행률</div>
+                      <div className="text-2xl font-bold text-emerald-300">{arcStructure.progressPercent}%</div>
+                      <div className="text-xs text-slate-500">{arcStructure.totalWrittenEpisodes}/{arcStructure.totalPlannedEpisodes}화</div>
+                    </div>
+                    {arcStructure.currentArc && (
+                      <>
+                        <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+                          <div className="text-xs text-slate-400">현재 아크</div>
+                          <div className="text-lg font-semibold text-white">{arcStructure.currentArc.name}</div>
+                          <div className="text-xs text-slate-500">위치: {arcStructure.currentArc.position} ({arcStructure.currentArc.episodeInArc}/{arcStructure.currentArc.totalEpisodesInArc}화)</div>
+                        </div>
+                        <div className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+                          <div className="text-xs text-slate-400">아크 내 진행률</div>
+                          <div className="text-2xl font-bold text-sky-300">{arcStructure.currentArc.progressPercent}%</div>
+                          <div className="text-xs text-slate-500">남은 {arcStructure.currentArc.remainingEpisodes}화</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {arcStructure.arcs.length > 0 && (
+                    <div className="mt-3">
+                      <div className="text-xs text-slate-400 mb-2">아크 목록</div>
+                      <div className="flex flex-wrap gap-2">
+                        {arcStructure.arcs.map((arc, i) => (
+                          <span key={i} className={`rounded-full px-3 py-1 text-xs font-medium ${
+                            arc.status === 'completed' ? 'bg-emerald-500/20 text-emerald-200' :
+                            arc.status === 'in_progress' ? 'bg-amber-500/20 text-amber-200' :
+                            'bg-slate-700 text-slate-400'
+                          }`}>
+                            {arc.status === 'completed' ? '✅' : arc.status === 'in_progress' ? '🔄' : '📋'} {arc.arcName} ({arc.episodeStart}-{arc.episodeEnd}화)
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-sm text-slate-400">아크 구조 정보 없음 (스토리 바이블에서 arc_name/arc_position 설정 필요)</div>
+              )}
+            </div>
+
+            {/* 복선 맵 */}
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-base font-semibold text-amber-200">🎣 복선 맵 (회수 시점 관리)</h2>
+                <span className="text-xs text-slate-400">현재 {episode?.episode_number}화</span>
+              </div>
+              <div className="space-y-2">
+                {hooks.filter(h => h.status === 'open').length === 0 ? (
+                  <div className="text-sm text-slate-400">열린 복선 없음</div>
+                ) : (
+                  hooks.filter(h => h.status === 'open').map((hook, i) => {
+                    const urgency = getHookUrgency(hook);
+                    return (
+                      <div key={hook.id || i} className={`rounded-xl border bg-slate-900 p-3 ${
+                        urgency.color === 'rose' ? 'border-rose-500/50' :
+                        urgency.color === 'amber' ? 'border-amber-500/50' :
+                        urgency.color === 'yellow' ? 'border-yellow-500/50' :
+                        urgency.color === 'sky' ? 'border-sky-500/50' :
+                        'border-slate-700'
+                      }`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                urgency.color === 'rose' ? 'bg-rose-500/30 text-rose-200' :
+                                urgency.color === 'amber' ? 'bg-amber-500/30 text-amber-200' :
+                                urgency.color === 'yellow' ? 'bg-yellow-500/30 text-yellow-200' :
+                                urgency.color === 'sky' ? 'bg-sky-500/30 text-sky-200' :
+                                'bg-slate-700 text-slate-300'
+                              }`}>{urgency.label}</span>
+                              <span className="text-xs text-slate-500">중요도 {hook.importance ?? 5}</span>
+                              {hook.created_in_episode_number && (
+                                <span className="text-xs text-slate-600">설치: {hook.created_in_episode_number}화</span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-sm text-slate-200">{hook.summary}</div>
+                            {hook.detail && <div className="mt-1 text-xs text-slate-400">{hook.detail}</div>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="text-[10px] text-slate-500">회수 예정</span>
+                              <input
+                                type="number"
+                                min={1}
+                                value={hook.target_resolution_episode ?? ''}
+                                onChange={(e) => {
+                                  const val = e.target.value ? parseInt(e.target.value) : null;
+                                  setHooks(prev => prev.map((h, idx) =>
+                                    h.id === hook.id ? { ...h, target_resolution_episode: val } : h
+                                  ));
+                                }}
+                                placeholder="화"
+                                className="w-16 rounded border border-slate-600 bg-slate-800 px-2 py-1 text-center text-sm outline-none focus:border-amber-500"
+                              />
+                            </div>
+                            <button
+                              onClick={() => void saveHook(hook, i)}
+                              disabled={hooksSaving}
+                              className="rounded bg-amber-500/20 px-2 py-1 text-xs text-amber-200 hover:bg-amber-500/30 disabled:opacity-50"
+                            >
+                              저장
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* 씬 기반 작성 준비 */}
+            <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-5">
+              <h2 className="mb-3 text-base font-semibold text-indigo-200">🎬 씬 기반 작성 (4분할)</h2>
+              <p className="mb-3 text-xs text-slate-400">각 씬에서 일어날 핵심 내용을 입력하면, AI가 이전 씬 컨텍스트를 유지하며 순차 생성합니다.</p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {(['1. 도입 (Opening)', '2. 전개 (Rising)', '3. 절정 (Climax)', '4. 마무리 (Ending)'] as const).map((label, i) => (
+                  <div key={i} className="rounded-xl border border-slate-700 bg-slate-900 p-3">
+                    <div className="mb-1 text-xs font-medium text-indigo-300">{label}</div>
+                    <textarea
+                      value={sceneBeats[i]}
+                      onChange={(e) => {
+                        const next = [...sceneBeats] as [string, string, string, string];
+                        next[i] = e.target.value;
+                        setSceneBeats(next);
+                      }}
+                      rows={3}
+                      placeholder={`씬 ${i + 1}에서 일어날 일을 작성하세요...`}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setSceneMode(true);
+                    setTab('workspace');
+                  }}
+                  disabled={sceneBeats.some(b => !b.trim())}
+                  className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                >
+                  씬 기반 작성 시작 →
+                </button>
+                <span className="text-xs text-slate-500">
+                  {sceneBeats.filter(b => b.trim()).length}/4 씬 준비됨
+                </span>
+              </div>
+            </div>
+
+            {/* 빠른 작업 */}
+            <div className="rounded-2xl border border-slate-700 bg-slate-900 p-5">
+              <h2 className="mb-3 text-base font-semibold text-slate-200">⚡ 빠른 작업</h2>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => setTab('workspace')} className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
+                  일반 생성 모드 →
+                </button>
+                <button onClick={() => setTab('setup')} className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
+                  기획 수정 →
+                </button>
+                <button onClick={() => void load()} className="rounded-lg border border-slate-600 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">
+                  새로고침
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         {tab === 'workspace' && (
           <section>
             <div className="mb-4 rounded-2xl border border-slate-800 bg-slate-900 p-4">
@@ -919,12 +1208,63 @@ export function EpisodeEditorV2({ projectId, episodeId }: Props) {
               </aside>
               <main className="space-y-4">
                 <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
-                  <h3 className="mb-2 text-sm font-semibold">PD 지시사항</h3>
-                  <textarea value={pd} onChange={(e) => setPd(e.target.value)} rows={4} placeholder="Direction for this episode" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" />
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold">PD 지시사항</h3>
+                    <label className="flex items-center gap-2 text-xs text-slate-400">
+                      <input
+                        type="checkbox"
+                        checked={sceneMode}
+                        onChange={(e) => setSceneMode(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-600 bg-slate-800"
+                      />
+                      씬 기반 작성 (4분할)
+                    </label>
+                  </div>
+                  <textarea value={pd} onChange={(e) => setPd(e.target.value)} rows={3} placeholder="Direction for this episode" className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none" />
+
+                  {sceneMode && (
+                    <div className="mt-3 rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3">
+                      <div className="mb-2 text-xs font-semibold text-indigo-200">씬 비트 (4개 씬에서 일어날 일)</div>
+                      <div className="grid gap-2 md:grid-cols-2">
+                        {(['도입 (Opening)', '전개 (Rising)', '절정 (Climax)', '마무리 (Ending)'] as const).map((label, i) => (
+                          <div key={i} className="flex flex-col gap-1">
+                            <span className="text-[10px] font-medium text-slate-400">씬 {i + 1}: {label}</span>
+                            <textarea
+                              value={sceneBeats[i]}
+                              onChange={(e) => {
+                                const next = [...sceneBeats] as [string, string, string, string];
+                                next[i] = e.target.value;
+                                setSceneBeats(next);
+                              }}
+                              rows={2}
+                              placeholder={`씬 ${i + 1}에서 일어날 일...`}
+                              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                      {sceneProgress && (
+                        <div className="mt-2 text-xs text-indigo-300">
+                          씬 {sceneProgress.current}/{sceneProgress.total} 생성 중...
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={() => void startDraft()} disabled={busy} className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-60">{flow === 'drafting' ? '집필 중...' : 'AI 생성'}</button>
-                    <button onClick={() => void validate(content)} disabled={busy || content.trim().length < 100} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 disabled:opacity-50">재검수</button>
-                    <button onClick={() => { abortRef.current?.abort(); setFlow(content.trim() ? 'drafted' : 'idle'); }} disabled={flow !== 'drafting'} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 disabled:opacity-50">중단</button>
+                    {sceneMode ? (
+                      <button
+                        onClick={() => void generateWithScenes()}
+                        disabled={busy || sceneBusy}
+                        className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-60"
+                      >
+                        {sceneBusy ? '씬 생성 중...' : '씬 기반 생성'}
+                      </button>
+                    ) : (
+                      <button onClick={() => void startDraft()} disabled={busy} className="rounded-lg bg-indigo-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-60">{flow === 'drafting' ? '집필 중...' : 'AI 생성'}</button>
+                    )}
+                    <button onClick={() => void validate(content)} disabled={busy || sceneBusy || content.trim().length < 100} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 disabled:opacity-50">재검수</button>
+                    <button onClick={() => { abortRef.current?.abort(); setFlow(content.trim() ? 'drafted' : 'idle'); }} disabled={flow !== 'drafting' && !sceneBusy} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 disabled:opacity-50">중단</button>
                   </div>
                 </div>
                 <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">

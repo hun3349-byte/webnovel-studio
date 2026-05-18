@@ -57,6 +57,37 @@ export interface CurrentArcSummary {
 }
 
 /**
+ * 아크 정보 (전체 스토리 구조용)
+ */
+export interface ArcInfo {
+  arcName: string;
+  episodeStart: number;
+  episodeEnd: number;
+  status: 'completed' | 'in_progress' | 'planned';
+  summary: string;
+  episodeCount: number;
+}
+
+/**
+ * 전체 아크 구조 요약
+ * AI가 현재 회차가 전체 스토리에서 어디에 위치하는지 인지하도록 함
+ */
+export interface ArcStructureSummary {
+  totalPlannedEpisodes: number;
+  totalWrittenEpisodes: number;
+  progressPercent: number;
+  arcs: ArcInfo[];
+  currentArc: {
+    name: string;
+    position: 'start' | 'rising' | 'climax' | 'falling' | 'end';
+    remainingEpisodes: number;
+    progressPercent: number;
+    episodeInArc: number;
+    totalEpisodesInArc: number;
+  } | null;
+}
+
+/**
  * 에피소드 시놉시스 (Story Bible)
  * V9.0: 감정 곡선, 마지막 장면 이미지, 금지사항, 씬 대본 필드 추가
  */
@@ -139,6 +170,12 @@ export interface SlidingWindowContext {
   episodeSynopses?: EpisodeSynopsis[];
   transitionContract?: EpisodeTransitionContract | null;
   previousCharacterSnapshots?: CharacterStateSnapshot[];
+
+  // ★ 전체 아크 구조 (Phase 1: 일관성 개선)
+  arcStructure?: ArcStructureSummary;
+
+  // ★ 긴급도 계산된 복선 목록 (Phase 2: 복선 맵)
+  enhancedHooks?: EnhancedUnresolvedHook[];
 }
 
 /**
@@ -220,6 +257,16 @@ export interface UnresolvedHook {
   importance: number;
   createdInEpisodeNumber: number;
   keywords: string[];
+  targetResolutionEpisode?: number | null;
+}
+
+/**
+ * 긴급도가 계산된 미해결 떡밥 (Phase 2: 복선 맵)
+ */
+export interface EnhancedUnresolvedHook extends UnresolvedHook {
+  urgency: 'overdue' | 'due_now' | 'approaching' | 'future';
+  isOverdue: boolean;
+  episodesUntilDue: number | null;
 }
 
 /**

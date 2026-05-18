@@ -734,6 +734,7 @@ export type Database = {
           resolved_in_episode_number: number | null
           status: string | null
           summary: string
+          target_resolution_episode: number | null
           updated_at: string | null
         }
         Insert: {
@@ -752,6 +753,7 @@ export type Database = {
           resolved_in_episode_number?: number | null
           status?: string | null
           summary: string
+          target_resolution_episode?: number | null
           updated_at?: string | null
         }
         Update: {
@@ -770,6 +772,7 @@ export type Database = {
           resolved_in_episode_number?: number | null
           status?: string | null
           summary?: string
+          target_resolution_episode?: number | null
           updated_at?: string | null
         }
         Relationships: [

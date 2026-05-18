@@ -9,6 +9,9 @@ import type {
   TimelineEvent,
   CurrentArcSummary,
   EpisodeSynopsis,
+  ArcStructureSummary,
+  ArcInfo,
+  EnhancedUnresolvedHook,
 } from '@/types/memory';
 
 /**
@@ -32,6 +35,7 @@ export async function buildSlidingWindowContext(
     includeWritingPreferences?: boolean;
     includeTimelineEvents?: boolean;
     includeSynopses?: boolean;
+    includeArcStructure?: boolean;
   } = {}
 ): Promise<SlidingWindowContext> {
   const {
@@ -40,6 +44,7 @@ export async function buildSlidingWindowContext(
     includeWritingPreferences = true,
     includeTimelineEvents = true,
     includeSynopses = true,
+    includeArcStructure = true,
   } = options;
 
   const supabase = await createServerSupabaseClient();
@@ -135,6 +140,12 @@ export async function buildSlidingWindowContext(
     throw new Error(`World Bible 조회 실패: ${worldBibleResult.error.message}`);
   }
 
+  // ★ 전체 아크 구조 조회 (Phase 1: 일관성 개선)
+  let arcStructure: ArcStructureSummary | null = null;
+  if (includeArcStructure) {
+    arcStructure = await fetchArcStructureSummary(projectId, targetEpisodeNumber);
+  }
+
   // 장기 기억 검색 (선택적)
   let longTermMemories: LongTermMemoryResult[] = [];
   if (longTermSearchQueries.length > 0) {
@@ -185,14 +196,46 @@ export async function buildSlidingWindowContext(
     goals: char.goals || [],
   }));
 
-  const unresolvedHooks: UnresolvedHook[] = (unresolvedHooksResult.data || []).map(hook => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const unresolvedHooks: UnresolvedHook[] = (unresolvedHooksResult.data || []).map((hook: any) => ({
     id: hook.id,
     hookType: hook.hook_type,
     summary: hook.summary,
     importance: hook.importance,
     createdInEpisodeNumber: hook.created_in_episode_number,
     keywords: hook.keywords || [],
+    targetResolutionEpisode: hook.target_resolution_episode || null,
   }));
+
+  // ★ Phase 2: 긴급도 계산된 복선 목록 생성
+  const enhancedHooks: EnhancedUnresolvedHook[] = unresolvedHooks.map(hook => {
+    const target = hook.targetResolutionEpisode;
+    let urgency: EnhancedUnresolvedHook['urgency'] = 'future';
+    let isOverdue = false;
+    let episodesUntilDue: number | null = null;
+
+    if (target !== null && target !== undefined) {
+      episodesUntilDue = target - targetEpisodeNumber;
+
+      if (episodesUntilDue < 0) {
+        urgency = 'overdue';
+        isOverdue = true;
+      } else if (episodesUntilDue === 0) {
+        urgency = 'due_now';
+      } else if (episodesUntilDue <= 3) {
+        urgency = 'approaching';
+      } else {
+        urgency = 'future';
+      }
+    }
+
+    return {
+      ...hook,
+      urgency,
+      isOverdue,
+      episodesUntilDue,
+    };
+  });
 
   const writingPreferences: WritingPreference[] = (writingMemoriesResult.data || [])
     .filter(mem => mem.feedback_type) // null인 경우 제외
@@ -332,6 +375,10 @@ export async function buildSlidingWindowContext(
     transitionContract,
     previousCharacterSnapshots:
       previousCharacterSnapshots.length > 0 ? previousCharacterSnapshots : undefined,
+    // ★ 전체 아크 구조 (Phase 1: 일관성 개선)
+    arcStructure: arcStructure || undefined,
+    // ★ 긴급도 계산된 복선 목록 (Phase 2: 복선 맵)
+    enhancedHooks: enhancedHooks.length > 0 ? enhancedHooks : undefined,
   };
 }
 
@@ -746,6 +793,156 @@ export function buildDynamicContext(context: SlidingWindowContext): DynamicConte
     urgentHooks,
     estimatedTokenReduction,
   };
+}
+
+/**
+ * 전체 아크 구조 조회
+ * episode_synopses 테이블에서 arc_name 기준으로 전체 스토리 구조를 파악
+ */
+export async function fetchArcStructureSummary(
+  projectId: string,
+  targetEpisodeNumber: number
+): Promise<ArcStructureSummary | null> {
+  const supabase = await createServerSupabaseClient();
+
+  try {
+    // 1. 모든 에피소드 시놉시스 조회 (arc_name, arc_position 포함)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: synopses, error } = await (supabase as any)
+      .from('episode_synopses')
+      .select('episode_number, title, synopsis, arc_name, arc_position')
+      .eq('project_id', projectId)
+      .order('episode_number', { ascending: true });
+
+    if (error || !synopses || synopses.length === 0) {
+      console.log('[ArcStructure] 시놉시스 없음, 아크 구조 생성 불가');
+      return null;
+    }
+
+    // 2. 작성된 에피소드 수 조회
+    const { count: writtenCount } = await supabase
+      .from('episodes')
+      .select('id', { count: 'exact', head: true })
+      .eq('project_id', projectId)
+      .in('status', ['published', 'review']);
+
+    const totalWrittenEpisodes = writtenCount || 0;
+    const totalPlannedEpisodes = synopses.length;
+
+    // 3. arc_name 기준으로 그룹화
+    const arcMap = new Map<string, { episodes: typeof synopses; minEp: number; maxEp: number }>();
+
+    for (const syn of synopses) {
+      const arcName = syn.arc_name || '미분류';
+      if (!arcMap.has(arcName)) {
+        arcMap.set(arcName, { episodes: [], minEp: Infinity, maxEp: -Infinity });
+      }
+      const arc = arcMap.get(arcName)!;
+      arc.episodes.push(syn);
+      arc.minEp = Math.min(arc.minEp, syn.episode_number);
+      arc.maxEp = Math.max(arc.maxEp, syn.episode_number);
+    }
+
+    // 4. ArcInfo 배열 생성
+    const arcs: ArcInfo[] = [];
+    let currentArcInfo: ArcStructureSummary['currentArc'] = null;
+
+    for (const [arcName, arcData] of arcMap) {
+      const episodeStart = arcData.minEp;
+      const episodeEnd = arcData.maxEp;
+      const episodeCount = arcData.episodes.length;
+
+      // 아크 상태 결정
+      let status: ArcInfo['status'];
+      if (targetEpisodeNumber > episodeEnd) {
+        status = 'completed';
+      } else if (targetEpisodeNumber >= episodeStart && targetEpisodeNumber <= episodeEnd) {
+        status = 'in_progress';
+      } else {
+        status = 'planned';
+      }
+
+      // 아크 요약 생성 (첫 에피소드 시놉시스 기반)
+      const firstSynopsis = arcData.episodes[0]?.synopsis || '';
+      const summary = firstSynopsis.length > 100
+        ? firstSynopsis.substring(0, 100) + '...'
+        : firstSynopsis;
+
+      arcs.push({
+        arcName,
+        episodeStart,
+        episodeEnd,
+        status,
+        summary,
+        episodeCount,
+      });
+
+      // 현재 아크 정보 추출
+      if (status === 'in_progress') {
+        const episodeInArc = targetEpisodeNumber - episodeStart + 1;
+        const totalEpisodesInArc = episodeCount;
+        const progressPercent = Math.round((episodeInArc / totalEpisodesInArc) * 100);
+
+        // 아크 내 위치 결정
+        let position: 'start' | 'rising' | 'climax' | 'falling' | 'end';
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const currentSynopsis = arcData.episodes.find((s: any) => s.episode_number === targetEpisodeNumber);
+        const arcPosition = currentSynopsis?.arc_position?.toLowerCase() || '';
+
+        if (arcPosition.includes('start') || arcPosition.includes('beginning')) {
+          position = 'start';
+        } else if (arcPosition.includes('climax') || arcPosition.includes('peak')) {
+          position = 'climax';
+        } else if (arcPosition.includes('end') || arcPosition.includes('resolution')) {
+          position = 'end';
+        } else if (arcPosition.includes('falling')) {
+          position = 'falling';
+        } else {
+          // arc_position이 없으면 진행률로 추정
+          if (progressPercent < 20) position = 'start';
+          else if (progressPercent < 50) position = 'rising';
+          else if (progressPercent < 80) position = 'climax';
+          else if (progressPercent < 95) position = 'falling';
+          else position = 'end';
+        }
+
+        currentArcInfo = {
+          name: arcName,
+          position,
+          remainingEpisodes: totalEpisodesInArc - episodeInArc,
+          progressPercent,
+          episodeInArc,
+          totalEpisodesInArc,
+        };
+      }
+    }
+
+    // 아크 정렬 (시작 에피소드 기준)
+    arcs.sort((a, b) => a.episodeStart - b.episodeStart);
+
+    const progressPercent = totalPlannedEpisodes > 0
+      ? Math.round((targetEpisodeNumber / totalPlannedEpisodes) * 100)
+      : 0;
+
+    const result: ArcStructureSummary = {
+      totalPlannedEpisodes,
+      totalWrittenEpisodes,
+      progressPercent,
+      arcs,
+      currentArc: currentArcInfo,
+    };
+
+    console.log('[ArcStructure] 아크 구조 생성 완료:', {
+      totalArcs: arcs.length,
+      currentArc: currentArcInfo?.name,
+      currentPosition: currentArcInfo?.position,
+    });
+
+    return result;
+  } catch (error) {
+    console.error('[ArcStructure] 아크 구조 조회 실패:', error);
+    return null;
+  }
 }
 
 /**

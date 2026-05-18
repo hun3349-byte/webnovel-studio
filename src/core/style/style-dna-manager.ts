@@ -30,13 +30,13 @@ function getServiceClient() {
 export async function saveStyleDNA(
   projectId: string,
   sourceName: string,
-  sourceType: 'reference' | 'pd_feedback' | 'manual',
+  sourceType: 'reference' | 'pd_feedback' | 'manual' | 'auto_learned',
   analysis: StyleAnalysisResult
 ): Promise<StyleDNA> {
   const supabase = getServiceClient();
 
-  // PD 피드백은 가중치 2.0
-  const weight = sourceType === 'pd_feedback' ? 2.0 : 1.0;
+  // PD 피드백은 가중치 2.0, 자동 학습은 1.5
+  const weight = sourceType === 'pd_feedback' ? 2.0 : sourceType === 'auto_learned' ? 1.5 : 1.0;
 
   const { data, error } = await supabase
     .from('style_dna')

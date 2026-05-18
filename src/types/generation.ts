@@ -181,3 +181,64 @@ export interface GenerationComparisonResult {
   blindMode: boolean;
   candidates: CompareCandidateResult[];
 }
+
+// ============================================
+// Phase 3: 씬 기반 작성 모드 타입
+// ============================================
+
+/**
+ * 개별 씬 생성 요청
+ */
+export interface SceneGenerationRequest {
+  projectId: string;
+  episodeId?: string;
+  targetEpisodeNumber: number;
+  sceneNumber: 1 | 2 | 3 | 4;
+  sceneBeats: string;           // 이 씬에서 일어날 일 (PD 지시)
+  previousScenes: string[];     // 이전에 생성된 씬들 (전체 텍스트)
+  userInstruction: string;      // 전체 에피소드 지시사항
+  context: SlidingWindowContext;
+}
+
+/**
+ * 개별 씬 생성 결과
+ */
+export interface SceneGenerationResult {
+  sceneNumber: 1 | 2 | 3 | 4;
+  content: string;
+  charCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+}
+
+/**
+ * 씬 기반 에피소드 생성 입력
+ */
+export interface SceneBasedWritingInput extends Omit<WritingOrchestratorInput, 'onTextChunk'> {
+  sceneBeats: [string, string, string, string];  // 4개 씬별 비트
+  onSceneComplete?: (scene: SceneGenerationResult) => void;
+}
+
+/**
+ * 씬 기반 에피소드 생성 결과
+ */
+export interface SceneBasedWritingResult {
+  mode: 'scene_based';
+  fullText: string;
+  scenes: SceneGenerationResult[];
+  totalCharCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalLatencyMs: number;
+  promptMetadata: PromptMetadata;
+}
+
+/**
+ * 씬 비트 (PD가 지정하는 씬별 대본)
+ */
+export interface SceneBeat {
+  sceneNumber: 1 | 2 | 3 | 4;
+  beat: string;                 // 이 씬의 핵심 내용
+  estimatedChars?: number;      // 예상 글자수 (선택)
+}
